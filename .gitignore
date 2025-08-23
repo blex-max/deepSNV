@@ -13,3 +13,6 @@ deepSNV.Rcheck
 /autom4te.cache/
 *.tar.gz
 builds
+compile_commands.json
+build/
+.cache/

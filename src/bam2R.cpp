@@ -4,89 +4,45 @@
  * Copyright (C) 2015-2018 drjsanger@github
  ***********************************************************************/
 
-#include <stdio.h>
-#include <string.h>
-#include "htslib/sam.h"
-#include "htslib/khash.h"
-#include <map>
+#include "bam2r_pileup.hpp"
+
+#ifdef STANDALONE_TEST  // placeholder for IDE, not actually relevant to this file
+#include <cstdio>
+#include <cstdlib>
+
+#define Rprintf std::printf
+#define Rf_error(...)                   \
+  do {                                  \
+    std::fprintf(stderr, __VA_ARGS__);  \
+    std::fputc('\n', stderr);           \
+    std::exit(1);                       \
+  } while (0)
+#define Rf_warning(...)                 \
+  do {                                  \
+    std::fprintf(stderr, __VA_ARGS__);  \
+    std::fputc('\n', stderr);           \
+  } while (0)
+
+using DL_FUNC = void (*)();
+struct DllInfo {
+  int _unused;
+};
+struct R_CMethodDef {
+  const char *name;
+  DL_FUNC fun;
+  int numArgs;
+};
+inline void R_registerRoutines(DllInfo *, R_CMethodDef *, void *, void *,
+                               void *) {}
+inline void R_useDynamicSymbols(DllInfo *, int) {}
+
+#else
 #define R_NO_REMAP
 #include <R.h>
-#include <Rinternals.h>
 #include <R_ext/Rdynload.h>
+#include <Rinternals.h>
+#endif
 
-using namespace std;
-KHASH_MAP_INIT_STR(strh,uint8_t) //readname -> readbase map used to prevent overlapping reads calls happening twice
-
-//const char seq_nt16_str[] = "=ACMGRSVTWYHKDBN";
-
-typedef struct {
-	int beg, end, q, s, head_clip;
-	int i;
-	int* counts;
-	map<char, int> nt_idx;
-	htsFile *in;
-} nttable_t;
-
-char NUCLEOTIDES[] = {'A','T','C','G','*','N','+','-','^','$','Q'};
-int N = 11;
-
-extern "C" {
-
-void bam2R_pileup_function(const bam_pileup1_t *pl, int pos, int n_plp, nttable_t& nttable)
-{
-  int i, s;
-  int len = nttable.end - nttable.beg;
-  map<char, int> nt_freq;
-	khash_t(strh) *h;
-	khiter_t k;
-	h = kh_init(strh);
-  if ((int)pos >= nttable.beg && (int)pos < nttable.end)
-  {
-
-    int* counts = nttable.counts + (int)pos - nttable.beg ;
-    for (i=0; i<n_plp; i++)
-    {
-      const bam_pileup1_t *p = pl + i;
-      s = bam_is_rev(p->b) * len * N;
-			int absent;
-	    k = kh_put(strh, h, bam_get_qname(p->b), &absent);
-			uint8_t cbase = bam_seqi(bam_get_seq(p->b),p->qpos);
-			uint8_t pre_b;
-			if(!absent){ //Read already processed to get base processed (we only increment if base is different between overlapping read pairs)
-				k = kh_get(strh, h, bam_get_qname(p->b));
-				pre_b = kh_val(h,k);
-			}else{
-				//Add the value to the hash
-				kh_value(h, k) = cbase;
-			}
-
-      {
-				if(!absent && pre_b == cbase) continue;
-        if (p->is_tail) counts[s + len * nttable.nt_idx['$']]++;
-        else if (p->is_head) counts[s + len * nttable.nt_idx['^']]++;
-
-        if(p->qpos < nttable.head_clip || (bam_is_rev(p->b) && ((bam1_core_t)p->b->core).l_qseq - p->qpos < nttable.head_clip)){
-          counts[s + len * nttable.nt_idx['N']]++;
-        }else{
-          if (!p->is_del) {
-            int  c = seq_nt16_str[bam_seqi(bam_get_seq(p->b), p->qpos)];
-            if( bam_get_qual(p->b)[p->qpos] > nttable.q)
-              counts[s + len * nttable.nt_idx[char(c)]]++;
-            else
-              counts[s + len * nttable.nt_idx['N']]++;
-            if (p->indel > 0)
-              counts[s + len * nttable.nt_idx['+']]++;
-            else if (p->indel < 0)
-              counts[s + len * nttable.nt_idx['-']]++;
-          } else counts[s + len * nttable.nt_idx['*']]++;
-          counts[s + len * nttable.nt_idx['Q']] += p->b->core.qual;
-        }
-      }
-    }
-    nttable.i++;
-  }
-	kh_destroy(strh, h);
-}
 
 static inline int64_t getNM(const bam1_t *b, unsigned long long& count)
 {
@@ -99,6 +55,8 @@ static inline int64_t getNM(const bam1_t *b, unsigned long long& count)
 	}
 }
 
+extern "C" {
+
 int bam2R(char** bamfile, char** ref, int* beg, int* end, int* counts, int* q, int* mq, int* s, 
           int* head_clip, int* maxdepth, int* verbose, int* mask, int *keepflag, int *maxmismatches )
 {
@@ -107,23 +65,14 @@ int bam2R(char** bamfile, char** ref, int* beg, int* end, int* counts, int* q, i
 	bam1_t *b = NULL;
 	bam_hdr_t *head = NULL;
 
-	nttable_t nttable;
-	nttable.q = *q; //Base quality cutoff
-	nttable.s = *s; //Strand (2=both)
-	nttable.head_clip = *head_clip;
-	nttable.i = 0;
-	nttable.counts = counts;
+  const NTParams params{*beg-1, *end, *q, *head_clip};
+	NTTable nttable{params, counts, hts_open(*bamfile, "r")};
+	// nttable.s = *s; //Strand (2=both) - does nothing
+	// nttable.i = 0;  // does nothing
 
 	int64_t maxNM = (*maxmismatches != -1)? *maxmismatches : INT64_MAX;
 	unsigned long long no_NM_count = 0;
 
-	int i;
-	for (i=0; i<N; i++)
-		nttable.nt_idx[NUCLEOTIDES[i]] = i;
-
-	nttable.beg = *beg -1;
-	nttable.end = *end;
-	nttable.in = hts_open(*bamfile, "r");
 	if (nttable.in == 0) {
 		Rf_error("Fail to open input BAM/CRAM file %s\n", *bamfile);
 		return 1;
@@ -165,17 +114,17 @@ int bam2R(char** bamfile, char** ref, int* beg, int* end, int* counts, int* q, i
 		}
 
 		if(*verbose)
-			Rprintf("Reading %s, %s:%d-%d\n", *bamfile, *ref, nttable.beg+1, nttable.end);
+			Rprintf("Reading %s, %s:%d-%d\n", *bamfile, *ref, nttable.params.beg+1, nttable.params.end);
 
 		//Implement a fetch style iterator
-		hts_itr_t *iter = sam_itr_queryi(idx, tid, nttable.beg, nttable.end);
+		hts_itr_t *iter = sam_itr_queryi(idx, tid, nttable.params.beg, nttable.params.end);
 		int result;
 		while ((result = sam_itr_next(nttable.in, iter, b)) >= 0) {
 			if ((b->core.flag & *mask)==0 && b->core.qual >= *mq && (b->core.flag & *keepflag)==*keepflag && getNM(b, no_NM_count) <= maxNM) {
 				bam_plp_push(buf, b);
 			};
 			while ( (pl=bam_plp_next(buf, &tid, &pos, &n_plp)) != 0) {
-				bam2R_pileup_function(pl,pos,n_plp,nttable);
+				bam2R_pileup_function(pl, pos, n_plp, nttable);
 			}
 		}
     if(result < -1){
@@ -189,7 +138,7 @@ int bam2R(char** bamfile, char** ref, int* beg, int* end, int* counts, int* q, i
 	bam_plp_push(buf,0); // finalize pileup
 
   while ( (pl=bam_plp_next(buf, &tid, &pos, &n_plp)) != 0) {
-    bam2R_pileup_function(pl,pos,n_plp,nttable);
+    bam2R_pileup_function(pl, pos, n_plp, nttable);
   }
 
 	if (*maxmismatches != -1 && no_NM_count > 0) {
