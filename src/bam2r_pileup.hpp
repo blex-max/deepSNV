@@ -4,6 +4,7 @@
 #include "htslib/hts.h"
 #include "htslib/khash.h"
 #include "htslib/sam.h"
+#include <stdexcept>
 
 
 KHASH_MAP_INIT_STR(strh, uint8_t)
@@ -11,7 +12,13 @@ KHASH_MAP_INIT_STR(strh, uint8_t)
 
 struct NTParams{ // fixed params
   // removed s param as never used
-	const int beg, end, bq_boundary, head_clip;
+	const int beg, end, bq_bound, head_clip_bound;
+
+  NTParams(int beg, int end, int bq_bound, int head_clip_bound) :  beg(beg), end(end), bq_bound(bq_bound), head_clip_bound(head_clip_bound) {
+    if (!(end > beg)) {
+      throw std::invalid_argument("end must be greater than beginning");
+    }
+  }
 
 	int len() const noexcept {
 	  return end - beg;
@@ -44,7 +51,7 @@ struct PileupRead {
 
 
 // exposed for testing
-void score_pile(
+int score_pile(
   const PileupRead& pile,
   int* counts,
   const NTParams& params,

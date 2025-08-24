@@ -46,18 +46,18 @@ static PileupRead unsafe_hot_make(const bam_pileup1_t& htspile) {
 
 // no static, exposed for testing
 // TODO: test this
-void score_pile(
+int score_pile(
   const PileupRead& pile,
   int* counts, // ptr to position in counts array where result data should be recorded ( nttable.counts + (int)pos - nttable.beg)
   const NTParams& params,
   khash_t(strh)* overlap_table
 ) {
   int strand_offset = pile.rev ? params.len() * N_COUNTS_FIELD: 0;
-	int key_in_hash;
-  khiter_t kht_i = kh_put(strh, overlap_table, pile.qname, &key_in_hash);
+	int put_ret;
+  khiter_t kht_i = kh_put(strh, overlap_table, pile.qname, &put_ret);
 	uint8_t prev_base;
 
-	if (!key_in_hash) { //Read already processed to get base processed (we only increment if base is different between overlapping read pairs)
+	if (put_ret == 0) { //Read already processed to get base processed (we only increment if base is different between overlapping read pairs)
 		kht_i = kh_get(strh, overlap_table, pile.qname);
 		prev_base = kh_val(overlap_table, kht_i);
 	} else {
@@ -66,19 +66,20 @@ void score_pile(
 	}
 
   {
-		if(!key_in_hash && prev_base == pile.base_nt16i) return;
+		if(put_ret == 0 && prev_base == pile.base_nt16i) return -1;
     if (pile.is_tail) counts[strand_offset + params.len() * COUNT_FIELD('$')]++;
     else if (pile.is_head) counts[strand_offset + params.len() * COUNT_FIELD('^')]++;
 
-    if (pile.qpos < params.head_clip || (pile.rev && pile.qlen - pile.qpos < params.head_clip)) {
+    if (pile.qpos < params.head_clip_bound || (pile.rev && pile.qlen - pile.qpos < params.head_clip_bound)) {
       counts[strand_offset + params.len() * COUNT_FIELD('N')]++;
     } else {
       if (!pile.is_del) {
         char base_ch = seq_nt16_str[pile.base_nt16i];
-        if (pile.base_q > params.bq_boundary)
+        if (pile.base_q > params.bq_bound) {
           counts[strand_offset + params.len() * COUNT_FIELD(base_ch)]++;
-        else
+        } else {
           counts[strand_offset + params.len() * COUNT_FIELD('N')]++;
+        }
 
         if (pile.indel > 0)
           counts[strand_offset + params.len() * COUNT_FIELD('+')]++;
@@ -91,6 +92,8 @@ void score_pile(
       counts[strand_offset + params.len() * COUNT_FIELD('Q')] += pile.map_q;
     }
   }
+
+  return 0;
 }
 
 void bam2R_pileup_function(const bam_pileup1_t* pileups_ptr, int pos, int n_pileups, NTTable& nttable)
