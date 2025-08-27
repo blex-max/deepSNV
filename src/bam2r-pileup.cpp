@@ -2,7 +2,7 @@
 // NOTE: the only thing that the R-side interface relies on is the counts array - that's the only thing it is necessary to preserve the structure of
 // TODO: NOW TEST
 
-#include "bam2r_pileup.hpp"
+#include "bam2r-pileup.hpp"
 
 // char NUCLEOTIDES[] = {'A','T','C','G','*','N','+','-','^','$','Q'};
 static constexpr int COUNT_FIELD(char c) {

@@ -10,8 +10,8 @@ CATCH_LIBS   := $(shell pkg-config --libs 'catch2-with-main >= 3.9')
 CPPFLAGS += $(HTS_CFLAGS) $(CATCH_CFLAGS)
 LDLIBS   += $(HTS_LIBS) $(CATCH_LIBS)
 
-SRC_LIB  := bam2r_pileup.cpp
-SRC_TEST := tests/test_bam2r_pileup.cpp
+SRC_LIB  := bam2r-pileup.cpp
+SRC_TEST := tests/test_bam2r-pileup.cpp
 
 BUILD_DIR := build
 
@@ -20,7 +20,7 @@ OBJ_LIB  := $(BUILD_DIR)/$(SRC_LIB:.cpp=.o)
 OBJ_TEST := $(BUILD_DIR)/$(notdir $(SRC_TEST:.cpp=.o))
 
 # final exec
-TARGET   := $(BUILD_DIR)/pileup_test_exec
+TARGET   := $(BUILD_DIR)/pileup-test-exec
 
 all: $(TARGET)
 

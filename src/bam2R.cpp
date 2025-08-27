@@ -4,44 +4,12 @@
  * Copyright (C) 2015-2018 drjsanger@github
  ***********************************************************************/
 
-#include "bam2r_pileup.hpp"
+#include "R_ext/Print.h"
+#include "deepsnv-prototypes.h"
+#include "bam2r-pileup.hpp"
 
-#ifdef STANDALONE_TEST  // placeholder for IDE, not actually relevant to this file
-#include <cstdio>
-#include <cstdlib>
-
-#define Rprintf std::printf
-#define Rf_error(...)                   \
-  do {                                  \
-    std::fprintf(stderr, __VA_ARGS__);  \
-    std::fputc('\n', stderr);           \
-    std::exit(1);                       \
-  } while (0)
-#define Rf_warning(...)                 \
-  do {                                  \
-    std::fprintf(stderr, __VA_ARGS__);  \
-    std::fputc('\n', stderr);           \
-  } while (0)
-
-using DL_FUNC = void (*)();
-struct DllInfo {
-  int _unused;
-};
-struct R_CMethodDef {
-  const char *name;
-  DL_FUNC fun;
-  int numArgs;
-};
-inline void R_registerRoutines(DllInfo *, R_CMethodDef *, void *, void *,
-                               void *) {}
-inline void R_useDynamicSymbols(DllInfo *, int) {}
-
-#else
 #define R_NO_REMAP
-#include <R.h>
-#include <R_ext/Rdynload.h>
 #include <Rinternals.h>
-#endif
 
 
 static inline int64_t getNM(const bam1_t *b, unsigned long long& count)
@@ -57,10 +25,9 @@ static inline int64_t getNM(const bam1_t *b, unsigned long long& count)
 
 extern "C" {
 
-int bam2R(char** bamfile, char** ref, int* beg, int* end, int* counts, int* q, int* mq, int* s, 
+void bam2R(char** bamfile, char** ref, int* beg, int* end, int* counts, int* q, int* mq, int* s, 
           int* head_clip, int* maxdepth, int* verbose, int* mask, int *keepflag, int *maxmismatches )
 {
-
 	bam_plp_t buf = NULL;
 	bam1_t *b = NULL;
 	bam_hdr_t *head = NULL;
@@ -75,20 +42,21 @@ int bam2R(char** bamfile, char** ref, int* beg, int* end, int* counts, int* q, i
 
 	if (nttable.in == 0) {
 		Rf_error("Fail to open input BAM/CRAM file %s\n", *bamfile);
-		return 1;
 	}
 
+	Rprintf("at 48\n");
 	buf = bam_plp_init(0,(void *)&nttable); // initialize pileup
 	bam_plp_set_maxcnt(buf,*maxdepth);
 	b = bam_init1();
-	//get header
 	head = sam_hdr_read(nttable.in);
 	//int mask = BAM_FUNMAP | BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY;
   int tid, pos, n_plp = -1;
 	const bam_pileup1_t *pl;
 
+	Rprintf("at 59 strcmp\n");
 	if (strcmp(*ref, "") == 0) { // if a region is not specified
 		//Replicate sampileup functionality (uses above mask without supplementary)
+		Rprintf("at 62, no chrom\n");
 		int ret;
 		while((ret = sam_read1(nttable.in, head, b)) >= 0){
 			if ((b->core.flag & *mask)==0 && b->core.qual >= *mq && (b->core.flag & *keepflag)==*keepflag && getNM(b, no_NM_count) <= maxNM) {
@@ -105,12 +73,10 @@ int bam2R(char** bamfile, char** ref, int* beg, int* end, int* counts, int* q, i
 		idx = sam_index_load(nttable.in,*bamfile); // load BAM index
 		if (idx == 0) {
 			Rf_error("BAM/CRAM index file is not available.\n");
-			return 1;
 		}
 		tid = bam_name2id(head, *ref);
 		if (tid < 0) {
 			Rf_error("Invalid sequence %s\n", *ref);
-			return 1;
 		}
 
 		if(*verbose)
@@ -129,7 +95,6 @@ int bam2R(char** bamfile, char** ref, int* beg, int* end, int* counts, int* q, i
 		}
     if(result < -1){
       Rf_error("Error code (%d) encountered reading sam iterator.\n", result);
-			return 1;
     }
 		sam_itr_destroy(iter);
 		hts_idx_destroy(idx);
@@ -149,15 +114,6 @@ int bam2R(char** bamfile, char** ref, int* beg, int* end, int* counts, int* q, i
 	bam_hdr_destroy(head);
 	bam_plp_destroy(buf);
 	hts_close(nttable.in);
-	return 0;
-}
-
-R_CMethodDef cMethods[] = {
-		{"bam2R", (DL_FUNC) &bam2R, 12}
-};
-
-void R_init_bam2R(DllInfo *info) {
-	R_registerRoutines(info, cMethods, NULL, NULL, NULL);
 }
 
 } // extern "C"

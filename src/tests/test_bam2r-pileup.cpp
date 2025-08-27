@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include "../bam2r_pileup.hpp"
+#include "../bam2r-pileup.hpp"
 #include "catch2/catch_message.hpp"
 #include "htslib/khash.h"
 
@@ -18,7 +18,7 @@ std::vector<int> counts(N_COUNTS_FIELD*2, 0);
 // NOTE: also test head_clip, and different base call
 TEST_CASE("score_pile() first member good", "[Overlap Behaviour Test]") {
   khash_t(strh)* kh = kh_init(strh);
-  static std::vector<int> test_counts = counts;
+  auto test_counts = counts;
 
   // get qname into overlap table, data into counts table
   static constexpr PileupRead r1{
@@ -53,7 +53,7 @@ TEST_CASE("score_pile() first member good", "[Overlap Behaviour Test]") {
 
 TEST_CASE("score_pile() first member bad qual", "[Overlap Behaviour Test]") {
   khash_t(strh)* kh = kh_init(strh);
-  static std::vector<int> test_counts = counts;
+  auto test_counts = counts;
 
   // get qname into overlap table, data into counts table
   static constexpr PileupRead r1{
