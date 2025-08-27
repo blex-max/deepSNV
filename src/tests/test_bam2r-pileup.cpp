@@ -84,3 +84,38 @@ TEST_CASE("score_pile() first member bad qual", "[Overlap Behaviour Test]") {
 
   kh_destroy(strh, kh);
 }
+
+
+TEST_CASE("score_pile() first member bad pos (head clip)", "[Overlap Behaviour Test]") {
+  khash_t(strh)* kh = kh_init(strh);
+  auto test_counts = counts;
+
+  // get qname into overlap table, data into counts table
+  static constexpr PileupRead r1{
+    4,  // above threshold
+    "r1",
+    100,
+    10,
+    1,  // "A"
+    11,  // above threshold
+    0,
+    false, false, false, false
+  };
+  int ret = score_pile(r1, test_counts.data(), p1, kh);
+  REQUIRE( ret == 0 );  // check success
+  CAPTURE( test_counts );
+  REQUIRE( test_counts[5] == 1 );  // base recorded as N in counts table
+  REQUIRE( test_counts[10] == 10 );  // mapq correct
+
+  auto test_snapshot = test_counts;
+  assert(test_counts == test_snapshot);  // sanity
+
+  // counts should update despite qname presence
+  // for better 2nd member of read pair
+  auto r2 = r1;
+  r2.qpos = 6;  // above head clip threshold
+  score_pile(r2, counts.data(), p1, kh);
+  REQUIRE( test_counts != test_snapshot );  // counts should not match snapshot (fails, indicating BUG)
+
+  kh_destroy(strh, kh);
+}

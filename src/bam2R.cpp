@@ -44,7 +44,6 @@ void bam2R(char** bamfile, char** ref, int* beg, int* end, int* counts, int* q, 
 		Rf_error("Fail to open input BAM/CRAM file %s\n", *bamfile);
 	}
 
-	Rprintf("at 48\n");
 	buf = bam_plp_init(0,(void *)&nttable); // initialize pileup
 	bam_plp_set_maxcnt(buf,*maxdepth);
 	b = bam_init1();
@@ -52,11 +51,8 @@ void bam2R(char** bamfile, char** ref, int* beg, int* end, int* counts, int* q, 
 	//int mask = BAM_FUNMAP | BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY;
   int tid, pos, n_plp = -1;
 	const bam_pileup1_t *pl;
-
-	Rprintf("at 59 strcmp\n");
 	if (strcmp(*ref, "") == 0) { // if a region is not specified
 		//Replicate sampileup functionality (uses above mask without supplementary)
-		Rprintf("at 62, no chrom\n");
 		int ret;
 		while((ret = sam_read1(nttable.in, head, b)) >= 0){
 			if ((b->core.flag & *mask)==0 && b->core.qual >= *mq && (b->core.flag & *keepflag)==*keepflag && getNM(b, no_NM_count) <= maxNM) {

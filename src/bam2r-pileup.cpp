@@ -1,10 +1,8 @@
 // TODO/NOTE: the throwaway bugs are NOT fixed in this version, I'm trying to keep the original logic but separate it into testable components
 // NOTE: the only thing that the R-side interface relies on is the counts array - that's the only thing it is necessary to preserve the structure of
-// TODO: NOW TEST
 
 #include "bam2r-pileup.hpp"
 
-// char NUCLEOTIDES[] = {'A','T','C','G','*','N','+','-','^','$','Q'};
 static constexpr int COUNT_FIELD(char c) {
     switch (c) {
         case 'A': return 0;
@@ -45,7 +43,6 @@ static PileupRead unsafe_hot_make(const bam_pileup1_t& htspile) {
 
 
 // no static, exposed for testing
-// TODO: test this
 int score_pile(
   const PileupRead& pile,
   int* counts, // ptr to position in counts array where result data should be recorded ( nttable.counts + (int)pos - nttable.beg)
@@ -71,7 +68,7 @@ int score_pile(
     else if (pile.is_head) counts[strand_offset + params.len() * COUNT_FIELD('^')]++;
 
     if (pile.qpos < params.head_clip_bound || (pile.rev && pile.qlen - pile.qpos < params.head_clip_bound)) {
-      counts[strand_offset + params.len() * COUNT_FIELD('N')]++;
+      counts[strand_offset + params.len() * COUNT_FIELD('N')]++;  // NOTE: doesn't record mapq, which is recorded for the other qual filter
     } else {
       if (!pile.is_del) {
         char base_ch = seq_nt16_str[pile.base_nt16i];
