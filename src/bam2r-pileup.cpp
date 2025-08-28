@@ -42,7 +42,6 @@ static PileupRead unsafe_hot_make(const bam_pileup1_t& htspile) {
 }
 
 
-static constexpr uint8_t AMBIG_BASE_CODE = 15;
 // no static, exposed for testing
 int score_pile(
   const PileupRead& pile,
@@ -54,42 +53,27 @@ int score_pile(
 	int put_ret;
   khiter_t kht_i = kh_put(strh, overlap_table, pile.qname, &put_ret);
 	uint8_t prev_base;
-	bool pos_fail = false;
-	bool qual_fail = false;
-	auto cbasei = pile.base_nt16i;
-
-  if (pile.qpos < params.head_clip_bound || (pile.rev && pile.qlen - pile.qpos < params.head_clip_bound)) { pos_fail=true; };
-  if (pile.base_q <= params.bq_bound) { qual_fail=true; };
-  // store base as ambiguous (N)
-  // initially tried different code for incoming ambiguous (N), and ambiguous due to these filters (255), but that meant that
-  // overlapping ambiguous bases from read pairs would be double counted since the different reasons for ambiguity aren't
-  // reflected in the counts array. TODO: discuss
-  // NOTE: current implementation means an overlapping base encountered after a good base that fails these filters,
-  // and is therefore flipped to N/15, is counted as a different base even if it's the same call when incoming.
-  // TODO: also discuss
-  if (qual_fail || pos_fail) { cbasei = AMBIG_BASE_CODE; };
 
 	if (put_ret == 0) { //Read already processed to get base processed (we only increment if base is different between overlapping read pairs)
 		kht_i = kh_get(strh, overlap_table, pile.qname);
 		prev_base = kh_val(overlap_table, kht_i);
 	} else {
 		//Add the value to the hash
-		kh_value(overlap_table, kht_i) = cbasei;
+		kh_value(overlap_table, kht_i) = pile.base_nt16i;
 	}
 
   {
-		if (put_ret == 0 && prev_base == cbasei) { return -1; };  // nothing new to count, base already counted
-    if (pile.is_tail)
-      counts[strand_offset + params.len() * COUNT_FIELD('$')]++;
-    else if (pile.is_head)
-      counts[strand_offset + params.len() * COUNT_FIELD('^')]++;
+		if(put_ret == 0 && prev_base == pile.base_nt16i) return -1;
+    if (pile.is_tail) counts[strand_offset + params.len() * COUNT_FIELD('$')]++;
+    else if (pile.is_head) counts[strand_offset + params.len() * COUNT_FIELD('^')]++;
 
-    if (pos_fail) {
+    if (pile.qpos < params.head_clip_bound || (pile.rev && pile.qlen - pile.qpos < params.head_clip_bound)) {
       counts[strand_offset + params.len() * COUNT_FIELD('N')]++;  // NOTE: doesn't record mapq, which is recorded for the other qual filter
     } else {
       if (!pile.is_del) {
-        if (!qual_fail) {
-          counts[strand_offset + params.len() * COUNT_FIELD(seq_nt16_str[cbasei])]++;  // NOTE: what if it's one of the other ambiguity codes?
+        char base_ch = seq_nt16_str[pile.base_nt16i];
+        if (pile.base_q > params.bq_bound) {
+          counts[strand_offset + params.len() * COUNT_FIELD(base_ch)]++;
         } else {
           counts[strand_offset + params.len() * COUNT_FIELD('N')]++;
         }

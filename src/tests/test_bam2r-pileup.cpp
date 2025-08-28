@@ -42,6 +42,14 @@ TEST_CASE("score_pile() first member good", "[Overlap Behaviour Test]") {
 
   // since qname is already in overlap table with the same base
   // counts shouldn't change as it should be rejected for having the same qname
+  score_pile(r1, test_counts.data(), p1, kh);
+  REQUIRE( test_counts == test_snapshot );
+
+  // since qname is already in overlap table, but now the internal qual filter in
+  // score pile will determine the base to be ambiguous, this should now update
+  // the ambiguity counter and add to mapq
+  test_snapshot[5] = 1;  // increment to expected result
+  test_snapshot[10] = 20;  // ditto
   auto r2 = r1;
   r2.base_q = 9;  // below threshold
   score_pile(r2, test_counts.data(), p1, kh);
@@ -75,12 +83,20 @@ TEST_CASE("score_pile() first member bad qual", "[Overlap Behaviour Test]") {
   auto test_snapshot = test_counts;
   assert(test_counts == test_snapshot);  // sanity
 
+  // counts should reject another ambiguous base (per internal
+  // quality filter) with the same qname
+  score_pile(r1, test_counts.data(), p1, kh);
+  REQUIRE( test_counts == test_snapshot );
+
   // counts should update despite qname presence
-  // for better 2nd member of read pair
+  // for non-ambiguous base passing internal filters
+  // with same qname (i.e. better 2nd member of overlapping read pair)
+  test_snapshot[0] = 1;  // increment to expected result
+  test_snapshot[10] = 20;  // ditto
   auto r2 = r1;
-  r2.base_q = 11;  // below threshold
+  r2.base_q = 11;  // above threshold
   score_pile(r2, test_counts.data(), p1, kh);
-  REQUIRE( test_counts != test_snapshot );  // counts should not match snapshot (fails, indicating BUG)
+  REQUIRE( test_counts == test_snapshot );
 
   kh_destroy(strh, kh);
 }
@@ -110,12 +126,20 @@ TEST_CASE("score_pile() first member bad pos (head clip)", "[Overlap Behaviour T
   auto test_snapshot = test_counts;
   assert(test_counts == test_snapshot);  // sanity
 
+  // counts should reject another ambiguous base (per internal
+  // pos/head_clip filter) with the same qname
+  score_pile(r1, test_counts.data(), p1, kh);
+  REQUIRE( test_counts == test_snapshot );
+
   // counts should update despite qname presence
-  // for better 2nd member of read pair
+  // for non-ambiguous base passing internal filters
+  // with same qname (i.e. better 2nd member of overlapping read pair)
+  test_snapshot[0] = 1;  // increment to expected result
+  test_snapshot[10] = 10;  // ditto
   auto r2 = r1;
   r2.qpos = 6;  // above head clip threshold
   score_pile(r2, test_counts.data(), p1, kh);
-  REQUIRE( test_counts != test_snapshot );  // counts should not match snapshot (fails, indicating BUG)
+  REQUIRE( test_counts == test_snapshot );  // counts should match snapshot
 
   kh_destroy(strh, kh);
 }
