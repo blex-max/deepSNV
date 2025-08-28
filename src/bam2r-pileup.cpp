@@ -1,5 +1,5 @@
-// TODO/NOTE: the throwaway bugs are NOT fixed in this version, I'm trying to keep the original logic but separate it into testable components
-// NOTE: the only thing that the R-side interface relies on is the counts array - that's the only thing it is necessary to preserve the structure of
+// NOTE: The R-side interface relies on only the counts array
+// all other structure is only internal representation
 
 #include "bam2r-pileup.hpp"
 
@@ -42,6 +42,7 @@ static PileupRead unsafe_hot_make(const bam_pileup1_t& htspile) {
 }
 
 
+static constexpr uint8_t AMBIG_BASE_CODE = 15;
 // no static, exposed for testing
 int score_pile(
   const PileupRead& pile,
@@ -53,29 +54,44 @@ int score_pile(
 	int put_ret;
   khiter_t kht_i = kh_put(strh, overlap_table, pile.qname, &put_ret);
 	uint8_t prev_base;
+	bool pos_fail = false;
+	bool qual_fail = false;
+	auto cbasei = pile.base_nt16i;
 
-	if (put_ret == 0) { //Read already processed to get base processed (we only increment if base is different between overlapping read pairs)
+  if (pile.qpos < params.head_clip_bound || (pile.rev && pile.qlen - pile.qpos < params.head_clip_bound)) { pos_fail=true; };
+  if (pile.base_q <= params.bq_bound) { qual_fail=true; };
+  // if a base fails filters store base as ambiguous (N).
+  // NOTE: initially tried different code for incoming ambiguous (N), and ambiguous due to these filters (255), but that meant that
+  // overlapping ambiguous bases from read pairs would be double counted since the different reasons for ambiguity aren't
+  // reflected in the counts array. This was discussed and it was decided that this should not occur.
+  // NOTE: this implementation means an overlapping base encountered after a good base that fails these filters,
+  // and is therefore flipped to N/15, is treated as a different base and therefore increments the ambiguous
+  // counter in the results array. This has been discussed and determined to be the correct approach (subject to testing).
+  if (qual_fail || pos_fail) { cbasei = AMBIG_BASE_CODE; };
+
+	if (put_ret == 0) {  // Read already processed to get base processed (we only increment if base is different between overlapping read pairs)
 		kht_i = kh_get(strh, overlap_table, pile.qname);
 		prev_base = kh_val(overlap_table, kht_i);
 	} else {
 		//Add the value to the hash
-		kh_value(overlap_table, kht_i) = pile.base_nt16i;
+		kh_value(overlap_table, kht_i) = cbasei;
 	}
 
   {
-		if(put_ret == 0 && prev_base == pile.base_nt16i) return -1;
-    if (pile.is_tail) counts[strand_offset + params.len() * COUNT_FIELD('$')]++;
-    else if (pile.is_head) counts[strand_offset + params.len() * COUNT_FIELD('^')]++;
+		if (put_ret == 0 && prev_base == cbasei) { return -1; };  // nothing new to count, base already counted
+    if (pile.is_tail)
+      counts[strand_offset + params.len() * COUNT_FIELD('$')]++;
+    else if (pile.is_head)
+      counts[strand_offset + params.len() * COUNT_FIELD('^')]++;
 
-    if (pile.qpos < params.head_clip_bound || (pile.rev && pile.qlen - pile.qpos < params.head_clip_bound)) {
+    if (pos_fail) {
       counts[strand_offset + params.len() * COUNT_FIELD('N')]++;  // NOTE: doesn't record mapq, which is recorded for the other qual filter
     } else {
       if (!pile.is_del) {
-        char base_ch = seq_nt16_str[pile.base_nt16i];
-        if (pile.base_q > params.bq_bound) {
-          counts[strand_offset + params.len() * COUNT_FIELD(base_ch)]++;
+        if (!qual_fail) {
+          counts[strand_offset + params.len() * COUNT_FIELD(seq_nt16_str[cbasei])]++;  // NOTE: what if it's one of the other ambiguity codes?
         } else {
-          counts[strand_offset + params.len() * COUNT_FIELD('N')]++;
+          counts[strand_offset + params.len() * COUNT_FIELD('N')]++;  // do increment for bad second pair member
         }
 
         if (pile.indel > 0)
