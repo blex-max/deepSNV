@@ -2,10 +2,10 @@ CXX      := g++
 # This project doesn't specify a cpp standard, and R defaults to 17 these days (2025)
 CXXFLAGS := -std=c++17 -O0 -g -Wall -Wextra -DSTANDALONE_TEST
 
-HTS_CFLAGS   := $(shell pkg-config --cflags 'htslib >= 1.7')
-HTS_LIBS     := $(shell pkg-config --libs 'htslib >= 1.7')
-CATCH_CFLAGS := $(shell pkg-config --cflags 'catch2-with-main >= 3.9')
-CATCH_LIBS   := $(shell pkg-config --libs 'catch2-with-main >= 3.9')
+HTS_CFLAGS   ?= $(shell pkg-config --cflags 'htslib >= 1.7')
+HTS_LIBS     ?= $(shell pkg-config --libs 'htslib >= 1.7')
+CATCH_CFLAGS ?= $(shell pkg-config --cflags 'catch2-with-main >= 3.9')
+CATCH_LIBS   ?= $(shell pkg-config --libs 'catch2-with-main >= 3.9')
 
 CPPFLAGS += $(HTS_CFLAGS) $(CATCH_CFLAGS)
 LDLIBS   += $(HTS_LIBS) $(CATCH_LIBS)
