@@ -358,7 +358,7 @@ manhattanPlot <- function(x, col=nt.col){
 bam2R = function(file, chr, start, stop, q=25, mq=0, s=2, head.clip = 0, max.depth=1000000, verbose=FALSE, mask=0, keepflag=0, max.mismatches=NULL){
 	if(is.null(max.mismatches)) max.mismatches <- -1
 	region = paste(chr,":",start,"-",stop, sep="")
-	result = .C("bam2R",
+	result = .C("C_bam2R",
 			as.character(file),
 			as.character(chr),
 			as.integer(start),

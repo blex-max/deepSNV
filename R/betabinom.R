@@ -13,7 +13,7 @@ dbetabinom = function(x, n, mu, rho, log=FALSE){
 	disp <- (1-rho)/rho
 	l = max(length(x),length(n),length(mu), length(disp))
 	d = numeric(l)
-	result = .C("dbetabinom",
+	result = .C("C_dbetabinom",
 			d,
 			as.integer(l),
 			as.integer(x),
@@ -44,7 +44,7 @@ pbetabinom = function(x, n, mu, rho, log=FALSE){
 	disp <- (1-rho)/rho
 	l = max(length(x),length(n),length(mu), length(disp))
 	p = numeric(l)
-	result = .C("pbetabinom",
+	result = .C("C_pbetabinom",
 			p,
 			as.integer(l),
 			as.integer(x),

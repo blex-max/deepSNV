@@ -1,0 +1,52 @@
+CXX      := g++
+# This project doesn't specify a cpp standard, and R defaults to 17 these days (2025)
+CXXFLAGS := -std=c++17 -O0 -g -Wall -Wextra -DSTANDALONE_TEST
+
+HTS_CFLAGS   ?= $(shell pkg-config --cflags 'htslib >= 1.7')
+HTS_LIBS     ?= $(shell pkg-config --libs 'htslib >= 1.7')
+CATCH_CFLAGS ?= $(shell pkg-config --cflags 'catch2-with-main >= 3.9')
+CATCH_LIBS   ?= $(shell pkg-config --libs 'catch2-with-main >= 3.9')
+
+CPPFLAGS += $(HTS_CFLAGS) $(CATCH_CFLAGS)
+LDLIBS   += $(HTS_LIBS) $(CATCH_LIBS)
+
+SRC_LIB  := bam2r-pileup.cpp
+SRC_TEST := tests/test_bam2r-pileup.cpp
+
+BUILD_DIR := build
+
+# map foo.cpp -> build/foo.o
+OBJ_LIB  := $(BUILD_DIR)/$(SRC_LIB:.cpp=.o)
+OBJ_TEST := $(BUILD_DIR)/$(notdir $(SRC_TEST:.cpp=.o))
+
+# final exec
+TARGET   := $(BUILD_DIR)/pileup-test-exec
+
+all: $(TARGET)
+
+# --- Linking rule ---
+# $^ = all prerequisites (object files)
+# $@ = the target (the executable)
+$(TARGET): $(OBJ_LIB) $(OBJ_TEST)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDLIBS)
+
+# --- Compilation rules ---
+# compile any root foo.cpp into build/foo.o
+# $< = first prerequisite (the .cpp file)
+# $@ = the target (the .o file)
+# The "| $(BUILD_DIR)" means that rule has to run first
+$(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+# this rule compiles tests
+$(BUILD_DIR)/%.o: tests/%.cpp | $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+# rule to create the build/ folder if missing
+$(BUILD_DIR):
+	mkdir -p $@
+
+clean:
+	rm -rf $(BUILD_DIR)
+
+.PHONY: all clean

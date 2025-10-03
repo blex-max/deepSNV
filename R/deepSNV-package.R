@@ -23,7 +23,7 @@
 #' @importFrom graphics plot
 #' @importFrom VGAM vglm
 #' @importFrom IRanges as.data.frame
-#' @useDynLib deepSNV
+#' @useDynLib deepSNV, .registration = TRUE
 NA
 
 .onLoad <- function(lib, pkg){

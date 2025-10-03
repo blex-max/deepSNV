@@ -4,11 +4,7 @@ betabinomial C implementation
 
 #include <stdio.h>
 #include <math.h>
-
-#define R_NO_REMAP
-#include <R.h>
-#include <Rinternals.h>
-#include <R_ext/Rdynload.h>
+#include "deepsnv-prototypes.h"
 
 
 double lbeta(double alpha, double beta){
@@ -32,7 +28,7 @@ double pbb(int x, int n, double mu, double disp, int logp) {
 	return p;
 }
 
-int dbetabinom(double* p, int* lp, int *x, int* lx, int *n, int* ln, double *mu, int* lmu, double *disp, int* ldisp, int *logp) {
+void dbetabinom(double* p, int* lp, int *x, int* lx, int *n, int* ln, double *mu, int* lmu, double *disp, int* ldisp, int *logp) {
 	int i, ix, in, imu, idisp;
 	ix=in=imu=idisp=0;
 	for(i=0; i<*lp;i++){
@@ -42,10 +38,9 @@ int dbetabinom(double* p, int* lp, int *x, int* lx, int *n, int* ln, double *mu,
 		imu = (++imu==*lmu) ? 0 : imu;
 		idisp = (++idisp==*ldisp) ? 0 : idisp;
 	}
-	return 0;
 }
 
-int pbetabinom(double* p, int*lp, int *x, int* lx, int *n, int* ln, double *mu, int* lmu, double *disp, int* ldisp, int *logp) {
+void pbetabinom(double* p, int*lp, int *x, int* lx, int *n, int* ln, double *mu, int* lmu, double *disp, int* ldisp, int *logp) {
 	int i, ix, in, imu, idisp;
 	ix=in=imu=idisp=0;
 	for(i=0; i<*lp;i++){
@@ -55,14 +50,13 @@ int pbetabinom(double* p, int*lp, int *x, int* lx, int *n, int* ln, double *mu, 
 		imu = (++imu==*lmu) ? 0 : imu;
 		idisp = (++idisp==*ldisp) ? 0 : idisp;
 	}
-	return 0;
 }
 
-R_CMethodDef cMethods2[] = {
-   {"dbetabinom", (DL_FUNC) &dbetabinom, 11},
-   {"pbetabinom", (DL_FUNC) &pbetabinom, 11}
-};
+// R_CMethodDef cMethods2[] = {
+//    {"dbetabinom", (DL_FUNC) &dbetabinom, 11},
+//    {"pbetabinom", (DL_FUNC) &pbetabinom, 11}
+// };
 
-void R_init_betabinom(DllInfo *info) {
-   R_registerRoutines(info, cMethods2, NULL, NULL, NULL);
-}
+// void R_init_betabinom(DllInfo *info) {
+//    R_registerRoutines(info, cMethods2, NULL, NULL, NULL);
+// }
