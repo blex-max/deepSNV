@@ -48,6 +48,9 @@ void bam2R(char** bamfile, char** ref, int* beg, int* end, int* counts, int* q, 
 	bam_plp_set_maxcnt(buf,*maxdepth);
 	b = bam_init1();
 	head = sam_hdr_read(nttable.in);
+	if (head == NULL) {
+		Rf_error("failed to get header from alignment file");
+	}
 	//int mask = BAM_FUNMAP | BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY;
   int tid, pos, n_plp = -1;
 	const bam_pileup1_t *pl;
@@ -59,7 +62,10 @@ void bam2R(char** bamfile, char** ref, int* beg, int* end, int* counts, int* q, 
 					bam_plp_push(buf, b);
             };
 			while ( (pl=bam_plp_next(buf, &tid, &pos, &n_plp)) != 0) {
-				bam2R_pileup_function(pl,pos,n_plp,nttable);
+				int rc = bam2R_pileup_function(pl,pos,n_plp,nttable);
+				if (rc == 1) {
+					Rf_error("pileup callback failed!");
+				}
 			}
 		}
 	}

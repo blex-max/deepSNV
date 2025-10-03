@@ -1,129 +1,258 @@
+// luca revisions
+
 // NOTE: The R-side interface relies on only the counts array
 // all other structure is only internal representation
 
+/*
+if a base fails filters store base as ambiguous (N).
+NOTE: initially tried different code for incoming ambiguous (N), and
+ambiguous due to these filters (255), but that meant that overlapping
+ambiguous bases from read pairs would be double counted since the different
+reasons for ambiguity aren't reflected in the counts array. This was
+discussed and it was decided that this should not occur. NOTE: this
+implementation means an overlapping base encountered after a good base that
+fails these filters, and is therefore flipped to N/15, is treated as a
+different base and therefore increments the ambiguous counter in the
+results array. This has been discussed and determined to be the correct
+approach (subject to testing).
+*/
+
+/*
+Changes:
+- all non-canonical bases count as N (any valid 4-bit code)
+*/
+
 #include "bam2r-pileup.hpp"
+#include "htslib/khash.h"
+#include "htslib/sam.h"
+#include <cstdint>
+#include <stdint.h>
 
-static constexpr int COUNT_FIELD(char c) {
-    switch (c) {
-        case 'A': return 0;
-        case 'T': return 1;
-        case 'C': return 2;
-        case 'G': return 3;
-        case '*': return 4;
-        case 'N': return 5;
-        case '+': return 6;
-        case '-': return 7;
-        case '^': return 8;
-        case '$': return 9;
-        case 'Q': return 10;
-        default:  return -1;
-    }
+// htslib 4-bit-encoding values
+
+static const uint8_t base_to_count_field[16] = {
+	[0] = COUNT_N,
+	[NT_A] = 0,
+	[NT_T] = 1,
+	[3] = COUNT_N,
+	[NT_C] = 2,
+	[5] = COUNT_N,
+	[6] = COUNT_N,
+	[7] = COUNT_N,
+	[NT_G] = 3,
+	[9]  = COUNT_N,
+	[10] = COUNT_N,
+	[11] = COUNT_N,
+	[12] = COUNT_N,
+	[13] = COUNT_N,
+	[14] = COUNT_N,
+	[15] = COUNT_N
+};
+
+
+
+#define PILEUP_PAIR_STRIDE 2
+#define PILEUP_PAIR_FLAG 0
+#define PILEUP_PAIR_BASE 1
+
+/* LOOKUP TABLES */
+
+// Indexed as: map[is_del][is_head][is_tail]
+static const uint8_t bam_pileup_to_flag[2][2][2] = {
+	// is_del = 0
+	{
+		// is_head = 0
+		{
+			FLAG_UNSET,
+			FLAG_TAIL
+		},
+		// is_head = 1
+		{
+			FLAG_HEAD,
+			FLAG_HEAD | FLAG_TAIL
+		}
+	},
+	// is_del = 1
+	{
+		// is_head = 0
+		{
+			FLAG_IS_DEL,
+			FLAG_IS_DEL | FLAG_TAIL
+		},
+		// is_head = 1
+		{
+			FLAG_IS_DEL | FLAG_HEAD,
+			FLAG_IS_DEL | FLAG_HEAD | FLAG_TAIL
+		}
+	}
+};
+
+static const uint8_t indel_to_flag[3] = {
+	[0] = FLAG_FDEL,  // negative
+	[1] = FLAG_UNSET,         // zero
+	[2] = FLAG_FINS   // positive
+};
+
+static const uint8_t position_fail_to_flag[2] = {FLAG_UNSET, FLAG_POS_FAIL};
+static const uint8_t quality_fail_to_flag[2]  = {FLAG_UNSET, FLAG_QUAL_FAIL};
+static const uint8_t reverse_to_flag[2] = {FLAG_UNSET, FLAG_REV};
+
+/* HELPER FUNCTIONS */
+
+
+static int nttable_get_offset(const NTTable *nttable, const int pos) {
+	// TODO: boundary check
+	return pos - nttable->params.beg;
 }
 
-// make the data struct in the hot loop without doing costly allocations etc.
-// const the output of this in usage to freeze
-static PileupRead unsafe_hot_make(const bam_pileup1_t& htspile) {
-    const bam1_t* b = htspile.b;  // local alias
-    PileupRead out;
-
-    out.qpos       = htspile.qpos;
-    out.qname      = bam_get_qname(b);  // borrowed pointer, so this will break if b disappears
-    out.qlen       = b->core.l_qseq;
-    out.base_nt16i = bam_seqi(bam_get_seq(b), htspile.qpos);
-    out.indel      = htspile.indel;
-    out.base_q     = bam_get_qual(b)[htspile.qpos];
-    out.map_q      = b->core.qual;
-    out.rev        = bam_is_rev(b);
-    out.is_del     = htspile.is_del;
-    out.is_head    = htspile.is_head;
-    out.is_tail    = htspile.is_tail;
-
-    return out;
+static int* nttable_get_counts(const NTTable *nttable, const int pos) {
+	return nttable->counts + nttable_get_offset(nttable, pos);
 }
 
+uint8_t get_pileup_flag(const NTParams &params, const PileupReadInfo &p) {
+	return
+		bam_pileup_to_flag[p.is_del][p.is_head][p.is_tail] |
+		reverse_to_flag[p.rev] |
+		indel_to_flag[(p.indel > 0) + (p.indel >= 0)] |
+		quality_fail_to_flag[p.base_q <= params.bq_bound] |
+		// Position fail (should the test be separate for forward and reverse?)
+		position_fail_to_flag[(
+			p.qpos < params.head_clip_bound ||
+			(p.base_q && p.qlen - p.qpos < params.head_clip_bound)
+		)];
+}
 
-static constexpr uint8_t AMBIG_BASE_CODE = 15;
-// no static, exposed for testing
-int score_pile(
-  const PileupRead& pile,
-  int* counts, // ptr to position in counts array where result data should be recorded ( nttable.counts + (int)pos - nttable.beg)
-  const NTParams& params,
-  khash_t(strh)* overlap_table
+uint8_t get_pileup_base(const bam_pileup1_t &p) {
+	return bam_seqi(bam_get_seq(p.b), p.qpos);
+}
+
+uint8_t get_pileup_base_quality(const bam_pileup1_t &p) {
+	return bam_get_qual(p.b)[p.qpos];
+}
+
+void base_set(
+	BaseInfo &b,
+	const NTParams &params,
+	const PileupReadInfo &p
 ) {
-  int strand_offset = pile.rev ? params.len() * N_COUNTS_FIELD: 0;
-	int put_ret;
-  khiter_t kht_i = kh_put(strh, overlap_table, pile.qname, &put_ret);
-	uint8_t prev_base;
-	bool pos_fail = false;
-	bool qual_fail = false;
-	auto cbasei = pile.base_nt16i;
+	b.base = p.base_nt16i;
+	b.flag = get_pileup_flag(params, p);
+	b.map_quality = p.map_q;
+	b.base_quality = p.base_q;
+}
 
-  if (pile.qpos < params.head_clip_bound || (pile.rev && pile.qlen - pile.qpos < params.head_clip_bound)) { pos_fail=true; };
-  if (pile.base_q <= params.bq_bound) { qual_fail=true; };
-  // if a base fails filters store base as ambiguous (N).
-  // NOTE: initially tried different code for incoming ambiguous (N), and ambiguous due to these filters (255), but that meant that
-  // overlapping ambiguous bases from read pairs would be double counted since the different reasons for ambiguity aren't
-  // reflected in the counts array. This was discussed and it was decided that this should not occur.
-  // NOTE: this implementation means an overlapping base encountered after a good base that fails these filters,
-  // and is therefore flipped to N/15, is treated as a different base and therefore increments the ambiguous
-  // counter in the results array. This has been discussed and determined to be the correct approach (subject to testing).
-  if (qual_fail || pos_fail) { cbasei = AMBIG_BASE_CODE; };
+int collate_alleles(const NTParams &params, const PileupReadInfo &p, khash_t(strh) *t) {
+	// Update read pair summary hash map
+	int put_rc;  // return code from put
+	const khiter_t i = kh_put(strh, t, p.qname.c_str(), &put_rc);  // n.b. khash does not copy the string, so p must not die
+	switch (put_rc) {
+		case 0:
+			// qname seen => set second read
+			base_set(kh_val(t, i).bases[1], params, p);
+			break;
+		case 1:
+		case 2:
+			// new qname => set first read
+			base_set(kh_val(t, i).bases[0], params, p);
+			kh_val(t, i).bases[1].base = UNDEFINED_VALUE;
+			break;
+		case -1:
+			fprintf(stderr, "Failed to put key into khash!\n");
+			return 1;
+		default:
+			fprintf(stderr, "Unknown khash return code: %d!\n", put_rc);
+			return 1;
+	}
+	return 0;
+}
 
-	if (put_ret == 0) {  // Read already processed to get base processed (we only increment if base is different between overlapping read pairs)
-		kht_i = kh_get(strh, overlap_table, pile.qname);
-		prev_base = kh_val(overlap_table, kht_i);
+void score_single(
+	const BaseInfo b,
+	const uint64_t c_offset,
+	int *counts
+) {
+	const uint64_t strand_offset = (b.flag & FLAG_REV) ? c_offset * N_COUNTS_FIELD : 0;
+
+	counts[strand_offset + c_offset * COUNT_HEAD] += (b.flag & FLAG_HEAD) != FLAG_UNSET;
+	counts[strand_offset + c_offset * COUNT_TAIL] += (b.flag & FLAG_TAIL) != FLAG_UNSET;
+
+	if (b.flag & FLAG_POS_FAIL) {
+		counts[strand_offset + c_offset * COUNT_N]++;
 	} else {
-		//Add the value to the hash
-		kh_value(overlap_table, kht_i) = cbasei;
+		if (b.flag & FLAG_IS_DEL) {
+			counts[strand_offset + c_offset * COUNT_IS_DEL]++;
+		} else {
+			if (b.flag & FLAG_QUAL_FAIL) {
+				counts[strand_offset + c_offset * COUNT_N]++;
+			} else {
+				// ASSUMPTION: base is 4 bit (in [0, 15])
+				counts[strand_offset + c_offset * (uint64_t)base_to_count_field[b.base]]++;
+			}
+
+			// NOTE: what about multi-base deletions (is_del follwed by negative indel?)?
+			counts[strand_offset + c_offset * COUNT_DEL] += (b.flag & FLAG_FDEL) != 0;
+			counts[strand_offset + c_offset * COUNT_INS] += (b.flag & FLAG_FINS) != 0;
+		}
+		counts[strand_offset + c_offset * COUNT_QUALITY] += (int)b.map_quality;
+	}
+}
+
+int score_pair_biased(const BaseInfoPair info, const uint64_t param_length, int *counts) {
+	// NOTE: the first item is ALWAYS set, because they are set in order of appearence
+	const BaseInfo a = info.bases[0];
+	const BaseInfo b = info.bases[1];
+
+	score_single(a, param_length, counts);
+
+	if (b.base != UNDEFINED_VALUE) {
+
+		if (b.base == a.base) {
+			return 0;
+		}
+
+		score_single(b, param_length, counts);
 	}
 
-  {
-		if (put_ret == 0 && prev_base == cbasei) { return -1; };  // nothing new to count, base already counted
-    if (pile.is_tail)
-      counts[strand_offset + params.len() * COUNT_FIELD('$')]++;
-    else if (pile.is_head)
-      counts[strand_offset + params.len() * COUNT_FIELD('^')]++;
-
-    if (pos_fail) {
-      counts[strand_offset + params.len() * COUNT_FIELD('N')]++;  // NOTE: doesn't record mapq, which is recorded for the other qual filter
-    } else {
-      if (!pile.is_del) {
-        if (!qual_fail) {
-          counts[strand_offset + params.len() * COUNT_FIELD(seq_nt16_str[cbasei])]++;  // NOTE: what if it's one of the other ambiguity codes?
-        } else {
-          counts[strand_offset + params.len() * COUNT_FIELD('N')]++;  // do increment for bad second pair member
-        }
-
-        if (pile.indel > 0)
-          counts[strand_offset + params.len() * COUNT_FIELD('+')]++;
-        else if (pile.indel < 0)
-          counts[strand_offset + params.len() * COUNT_FIELD('-')]++;
-
-      } else {
-        counts[strand_offset + params.len() * COUNT_FIELD('*')]++;
-      }
-      counts[strand_offset + params.len() * COUNT_FIELD('Q')] += pile.map_q;
-    }
-  }
-
-  return 0;
+	return 0;
 }
 
-void bam2R_pileup_function(const bam_pileup1_t* pileups_ptr, int pos, int n_pileups, NTTable& nttable)
-{
-  int pileup_i;
-	khash_t(strh) *kh_ptr = kh_init(strh);
 
-  if (pos >= nttable.params.beg && pos < nttable.params.end)
-  {
-    int* counts = nttable.counts + pos - nttable.params.beg;
-    for (pileup_i=0; pileup_i<n_pileups; pileup_i++)
-    {
-      const bam_pileup1_t* htspile = pileups_ptr + pileup_i;
-      const PileupRead pile = unsafe_hot_make(*htspile);
-      score_pile(pile, counts, nttable.params, kh_ptr);
-    }
-  }
-	kh_destroy(strh, kh_ptr);
+
+
+// static int wrap_scorer(const BaseInfoPair info, const uint64_t param_length, int *counts) {
+// 	return score_pair_biased(info, param_length, counts);
+// 	// return count_balanced(info, param_length, counts);
+// }
+
+/* CALLBACK */
+
+int bam2R_pileup_function(const bam_pileup1_t *pileups_ptr, int pos, int n_pileups, NTTable &nttable) {
+	if (!(pos >= nttable.params.beg && pos < nttable.params.end)) {
+		return 2;  // out of range
+	}
+
+	// Collate alleles by read pair
+	// TODO: consider persisting the hash map across positions
+	//  That would save memory allocations but require clean-up.
+	khash_t(strh) *collated_pileup = kh_init(strh);
+	for (int pileup_i = 0; pileup_i < n_pileups; pileup_i++) {
+		const bam_pileup1_t htspile = *(pileups_ptr + pileup_i);
+		auto pinfo = PileupReadInfo::from_pileup(htspile);
+		if (collate_alleles(nttable.params, pinfo, collated_pileup)) {
+			kh_destroy(strh, collated_pileup);
+			return 1;  // fail
+		}
+	}
+
+	// Count
+	int *counts = nttable_get_counts(&nttable, pos);
+	BalancedPairCounter scr;
+	for (khint_t i = kh_begin(collated_pileup); i != kh_end(collated_pileup); ++i) {
+		if (kh_exist(collated_pileup, i)) {
+			scr.score_pair(kh_val(collated_pileup, i), (uint64_t)nttable.params.len(), counts);
+		}
+	}
+
+	kh_destroy(strh, collated_pileup);
+	return 0;
 }
-
