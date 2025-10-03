@@ -41,13 +41,16 @@ void bam2R(char** bamfile, char** ref, int* beg, int* end, int* counts, int* q, 
 	unsigned long long no_NM_count = 0;
 
 	if (nttable.in == 0) {
-		Rf_error("Fail to open input BAM/CRAM file %s\n", *bamfile);
+		Rf_error("Failed to open input BAM/CRAM file %s\n", *bamfile);
 	}
 
 	buf = bam_plp_init(0,(void *)&nttable); // initialize pileup
 	bam_plp_set_maxcnt(buf,*maxdepth);
 	b = bam_init1();
 	head = sam_hdr_read(nttable.in);
+	if (head == NULL) {
+		Rf_error("Failed to retrieve header from input alignment file");
+	}
 	//int mask = BAM_FUNMAP | BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY;
   int tid, pos, n_plp = -1;
 	const bam_pileup1_t *pl;
