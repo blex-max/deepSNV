@@ -90,7 +90,9 @@ void bam2R(char **bamfile, char **ref, int *beg, int *end, int *counts, int *q,
         sam_itr_queryi(idx, tid, nttable.params.beg, nttable.params.end);
     int result;
     while ((result = sam_itr_next(nttable.in, iter, b)) >= 0) {
-      if ((b->core.flag & *mask) == 0 && b->core.qual >= *mq) {
+      if ((b->core.flag & *mask) == 0 && b->core.qual >= *mq) {  // as 1.27.1
+          // (b->core.flag & *keepflag) == *keepflag &&
+          // getNM(b, no_NM_count) <= maxNM) {
         bam_plp_push(buf, b);
       };
       while ((pl = bam_plp_next(buf, &tid, &pos, &n_plp)) != 0) {
