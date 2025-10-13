@@ -31,22 +31,22 @@ Changes:
 // htslib 4-bit-encoding values
 
 static const uint8_t base_to_count_field[16] = {
-	[0] = COUNT_N,
-	[NT_A] = 0,
-	[NT_T] = 1,
-	[3] = COUNT_N,
-	[NT_C] = 2,
-	[5] = COUNT_N,
-	[6] = COUNT_N,
-	[7] = COUNT_N,
-	[NT_G] = 3,
-	[9]  = COUNT_N,
-	[10] = COUNT_N,
-	[11] = COUNT_N,
-	[12] = COUNT_N,
-	[13] = COUNT_N,
-	[14] = COUNT_N,
-	[15] = COUNT_N
+    COUNT_N,
+    0,
+    1,
+    COUNT_N,
+    2,
+    COUNT_N,
+    COUNT_N,
+    COUNT_N,
+    3,
+    COUNT_N,
+    COUNT_N,
+    COUNT_N,
+    COUNT_N,
+    COUNT_N,
+    COUNT_N,
+    COUNT_N
 };
 
 
