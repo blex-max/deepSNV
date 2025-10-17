@@ -69,10 +69,10 @@ void bam2R (char **bamfile,
         // Replicate sampileup functionality (uses above mask without supplementary)
         int ret;
         while ((ret = sam_read1 (nttable.in, head, b)) >= 0) {
-            if (((b->core.flag & *mask) == 0 &&
-                 b->core.qual >= *mq) && // {  // as 1.27.1 if this line only
-                (b->core.flag & *keepflag) == *keepflag &&
-                getNM (b, no_NM_count) <= maxNM) {
+            if ((b->core.flag & *mask) == 0 &&
+                 b->core.qual >= *mq) {  // as 1.27.1 if these conds only
+                // (b->core.flag & *keepflag) == *keepflag &&
+                // getNM (b, no_NM_count) <= maxNM) {
                 bam_plp_push (buf, b);
             };
             while ((pl = bam_plp_next (buf, &tid, &pos, &n_plp)) != 0) {
@@ -102,10 +102,10 @@ void bam2R (char **bamfile,
         hts_itr_t *iter = sam_itr_queryi (idx, tid, nttable.params.beg, nttable.params.end);
         int result;
         while ((result = sam_itr_next (nttable.in, iter, b)) >= 0) {
-            if (((b->core.flag & *mask) == 0 &&
-                 b->core.qual >= *mq) && // {  // as 1.27.1 if this line only
-                (b->core.flag & *keepflag) == *keepflag &&
-                getNM (b, no_NM_count) <= maxNM) {
+            if ((b->core.flag & *mask) == 0 &&
+                 b->core.qual >= *mq) {  // as 1.27.1 if these conds only
+                // (b->core.flag & *keepflag) == *keepflag &&
+                // getNM (b, no_NM_count) <= maxNM) {
                 bam_plp_push (buf, b);
             };
             while ((pl = bam_plp_next (buf, &tid, &pos, &n_plp)) != 0) {
