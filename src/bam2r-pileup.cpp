@@ -28,6 +28,7 @@ Changes:
 #include <cstdint>
 #include <stdexcept>
 #include <stdint.h>
+#include <string>
 
 // htslib 4-bit-encoding values
 
@@ -110,33 +111,30 @@ int collate_alleles (const NTParams &params,
     int put_rc; // return code from put
     const khiter_t i = kh_put (strh, t, p.qname.c_str(),
                                &put_rc); // n.b. khash does not copy the string, so p must not die
-    int to_set;
-    int other;
-    if (!p.rev) { // forward
-        to_set = 0;
-        other = 1;
-    } else {
-        to_set = 1;
-        other = 0;
-    }
+    const int to_set = p.rev ? 1 : 0; // indexes into the base values
+    const int other = 1 - to_set;
     switch (put_rc) {
         case 0:
             // qname seen => set second read
             if (!(kh_val (t, i).bases[to_set].base == UNDEFINED_VALUE))
                 throw std::runtime_error ("duplicate qname on same strand! " + p.qname);
+            if (kh_val (t, i).bases[other].base == UNDEFINED_VALUE)
+                throw std::runtime_error ("khash value malformed! " + p.qname);
             base_set (kh_val (t, i).bases[to_set], params, p);
             break;
-        case 1:
+        case 1: // new qname also!!
+            base_set (kh_val (t, i).bases[to_set], params, p);
+            kh_val (t, i).bases[other].base = UNDEFINED_VALUE;
         case 2:
             // new qname => set first read
             base_set (kh_val (t, i).bases[to_set], params, p);
             kh_val (t, i).bases[other].base = UNDEFINED_VALUE;
             break;
         case -1:
-            fprintf (stderr, "Failed to put key into khash!\n");
+            throw std::runtime_error ("Failed to put key into khash!");
             return 1;
         default:
-            fprintf (stderr, "Unknown khash return code: %d!\n", put_rc);
+            throw std::runtime_error ("Unknown khash return code: " + std::to_string (put_rc));
             return 1;
     }
     return 0;
