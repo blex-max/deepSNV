@@ -211,7 +211,9 @@ int bam2R_pileup_function (const bam_pileup1_t *pileups_ptr,
     for (int pileup_i = 0; pileup_i < n_pileups; pileup_i++) {
         const bam_pileup1_t htspile = *(pileups_ptr + pileup_i);
         auto pinfo = PileupReadInfo::from_pileup (htspile);
-        if (collate_alleles (nttable.params, pinfo, collated_pileup)) {
+        try {
+            collate_alleles (nttable.params, pinfo, collated_pileup);
+        } catch(std::exception &e) {
             kh_destroy (strh, collated_pileup);
             return 1; // fail
         }
