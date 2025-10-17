@@ -103,9 +103,9 @@ void base_set (BaseInfo &b,
     b.base_quality = p.base_q;
 }
 
-int collate_alleles (const NTParams &params,
-                     const PileupReadInfo &p,
-                     khash_t (strh) * t) {
+void collate_alleles (const NTParams &params,
+                      const PileupReadInfo &p,
+                      khash_t (strh) * t) {
     // Update read pair summary hash map
     // forward member goes into bases[0], reverse into bases[1]
     int put_rc; // return code from put
@@ -125,6 +125,7 @@ int collate_alleles (const NTParams &params,
         case 1: // new qname also!!
             base_set (kh_val (t, i).bases[to_set], params, p);
             kh_val (t, i).bases[other].base = UNDEFINED_VALUE;
+            break;
         case 2:
             // new qname => set first read
             base_set (kh_val (t, i).bases[to_set], params, p);
@@ -132,12 +133,9 @@ int collate_alleles (const NTParams &params,
             break;
         case -1:
             throw std::runtime_error ("Failed to put key into khash!");
-            return 1;
         default:
             throw std::runtime_error ("Unknown khash return code: " + std::to_string (put_rc));
-            return 1;
     }
-    return 0;
 }
 
 
@@ -216,7 +214,9 @@ int bam2R_pileup_function (const bam_pileup1_t *pileups_ptr,
     for (int pileup_i = 0; pileup_i < n_pileups; pileup_i++) {
         const bam_pileup1_t htspile = *(pileups_ptr + pileup_i);
         auto pinfo = PileupReadInfo::from_pileup (htspile);
-        if (collate_alleles (nttable.params, pinfo, collated_pileup)) {
+        try {
+            collate_alleles (nttable.params, pinfo, collated_pileup);
+        } catch (std::exception &e) {
             kh_destroy (strh, collated_pileup);
             return 1; // fail
         }

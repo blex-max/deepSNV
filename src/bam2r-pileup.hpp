@@ -136,7 +136,7 @@ void base_set (BaseInfo &b,
 KHASH_MAP_INIT_STR (strh,
                     BaseInfoPair)
 
-int collate_alleles (const NTParams &params,
+void collate_alleles (const NTParams &params,
                      const PileupReadInfo &p,
                      khash_t (strh) * t);
 
