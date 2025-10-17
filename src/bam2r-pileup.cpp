@@ -104,8 +104,8 @@ void base_set (BaseInfo &b,
 }
 
 void collate_alleles (const NTParams &params,
-                     const PileupReadInfo &p,
-                     khash_t (strh) * t) {
+                      const PileupReadInfo &p,
+                      khash_t (strh) * t) {
     // Update read pair summary hash map
     // first member encountered goes into bases[0], second into bases[1]
     int put_rc; // return code from put
@@ -117,14 +117,12 @@ void collate_alleles (const NTParams &params,
             if (kh_val (t, i).bases[0].base == UNDEFINED_VALUE)
                 throw std::runtime_error ("khash value malformed! " + p.qname);
             if (!(kh_val (t, i).bases[1].base == UNDEFINED_VALUE))
-                throw std::runtime_error ("khash value malformed or qname seen more than twice! " + p.qname);
+                throw std::runtime_error ("khash value malformed or qname seen more than twice! " +
+                                          p.qname);
             base_set (kh_val (t, i).bases[1], params, p);
             break;
-        case 1:  // new qname => set first read
-            base_set (kh_val (t, i).bases[0], params, p);
-            kh_val (t, i).bases[1].base = UNDEFINED_VALUE;
-            break;
-        case 2:  // new qname also
+        case 1: // new qname on rc 1 and 2 => set first read
+        case 2:
             base_set (kh_val (t, i).bases[0], params, p);
             kh_val (t, i).bases[1].base = UNDEFINED_VALUE;
             break;
@@ -213,7 +211,7 @@ int bam2R_pileup_function (const bam_pileup1_t *pileups_ptr,
         auto pinfo = PileupReadInfo::from_pileup (htspile);
         try {
             collate_alleles (nttable.params, pinfo, collated_pileup);
-        } catch(std::exception &e) {
+        } catch (std::exception &e) {
             kh_destroy (strh, collated_pileup);
             return 1; // fail
         }
