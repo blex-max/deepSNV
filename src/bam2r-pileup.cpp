@@ -122,12 +122,8 @@ void collate_alleles (const NTParams &params,
                 throw std::runtime_error ("khash value malformed! " + p.qname);
             base_set (kh_val (t, i).bases[to_set], params, p);
             break;
-        case 1: // new qname also!!
-            base_set (kh_val (t, i).bases[to_set], params, p);
-            kh_val (t, i).bases[other].base = UNDEFINED_VALUE;
-            break;
+        case 1: // new qname on rc 1 and 2 => set first read
         case 2:
-            // new qname => set first read
             base_set (kh_val (t, i).bases[to_set], params, p);
             kh_val (t, i).bases[other].base = UNDEFINED_VALUE;
             break;
