@@ -23,8 +23,6 @@ Changes:
 */
 
 #include "bam2r-pileup.hpp"
-#include "htslib/hts.h"
-#include "htslib/khash.h"
 #include "htslib/sam.h"
 #include <cstdint>
 #include <stdexcept>
@@ -108,31 +106,28 @@ void base_set (BaseInfo &b,
 void collate_alleles (const NTParams &params,
                       const PileupReadInfo &p,
                       std::unordered_map<std::string,
-                                         BaseInfoPair> m) {
+                                         BaseInfoPair> &m) {
     // forward member goes into bases[0], reverse into bases[1]  (which is probably ill advised)
     const int to_set = std::clamp ((int)p.rev, 0, 1); // indexes into the base values
     const int other = 1 - to_set;
 
+    // n.b. BaseInfoPair ctor inits .base to UNDEFINED_VALUE
     auto [kv, qname_unseen] = m.try_emplace (p.qname, BaseInfoPair{});
 
     BaseInfoPair &pi = kv->second;
 
     auto b_toset = pi.bases[to_set].base;
     auto b_oth = pi.bases[other].base;
+    // std::string debug_toset = (b_toset == UNDEFINED_VALUE) ? "UNDEF" : std::string(&seq_nt16_str[b_toset]);
+    // std::string debug_oth = (b_oth == UNDEFINED_VALUE) ? "UNDEF" : std::string(&seq_nt16_str[b_oth]);
 
     if (!qname_unseen) { // qname seen before
         if (b_toset != UNDEFINED_VALUE) {
-            throw std::runtime_error ("duplicate qname on same strand! " + p.qname +
-                                      "val: " + std::to_string (b_toset) + "/" +
-                                      seq_nt16_str[pi.bases[to_set].base] + "\n" + "other" +
-                                      std::to_string (b_oth) + seq_nt16_str[b_oth]);
+            throw std::runtime_error ("duplicate qname on same strand! " + p.qname);
         }
-        if (pi.bases[other].base == UNDEFINED_VALUE) {
+        if (b_oth == UNDEFINED_VALUE) {
             throw std::runtime_error ("pair map malformed (other strand unset): " + p.qname);
         }
-    } else {
-        pi.bases[0].base = UNDEFINED_VALUE;
-        pi.bases[1].base = UNDEFINED_VALUE;
     }
     // fill new
     base_set (pi.bases[to_set], params, p);
@@ -208,31 +203,24 @@ int bam2R_pileup_function (const bam_pileup1_t *pileups_ptr,
     }
 
     // Collate alleles by read pair
-    // TODO: consider persisting the hash map across positions
-    //  That would save memory allocations but require clean-up.
     std::unordered_map<std::string, BaseInfoPair> qname_map;
-    khash_t (strh) *collated_pileup = kh_init (strh);
     for (int pileup_i = 0; pileup_i < n_pileups; pileup_i++) {
         const bam_pileup1_t htspile = *(pileups_ptr + pileup_i);
         auto pinfo = PileupReadInfo::from_pileup (htspile);
         try {
-            collate_alleles (nttable.params, pinfo, collated_pileup);
+            collate_alleles (nttable.params, pinfo, qname_map);
         } catch (std::exception &e) {
-            kh_destroy (strh, collated_pileup);
-            throw std::runtime_error (e.what());
-            return 1; // fail
+            throw;
+            // return 1; // fail
         }
     }
 
     // Count
     int *counts = nttable_get_counts (&nttable, pos);
     BalancedPairCounter scr;
-    for (khint_t i = kh_begin (collated_pileup); i != kh_end (collated_pileup); ++i) {
-        if (kh_exist (collated_pileup, i)) {
-            scr.score_pair (kh_val (collated_pileup, i), (uint64_t)nttable.params.len(), counts);
-        }
+    for (auto &[qname, bpair] : qname_map) {
+        scr.score_pair (bpair, (uint64_t)nttable.params.len(), counts);
     }
 
-    kh_destroy (strh, collated_pileup);
     return 0;
 }

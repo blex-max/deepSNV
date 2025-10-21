@@ -4,7 +4,6 @@
 #define BAM2R_PILEUP_H
 
 #include "htslib/hts.h"
-#include "htslib/khash.h"
 #include "htslib/sam.h"
 #include <cstdint>
 #include <stdexcept>
@@ -104,7 +103,7 @@ uint8_t get_pileup_flag (const NTParams &params,
                          const PileupReadInfo &p);
 
 struct BaseInfo {
-    uint8_t base;
+    uint8_t base = UNDEFINED_VALUE;
     uint8_t base_quality;
     uint8_t flag;
     uint8_t map_quality;
@@ -128,25 +127,6 @@ struct BaseInfo {
 struct BaseInfoPair {
     BaseInfo bases[2];
 };
-
-void base_set (BaseInfo &b,
-               const NTParams &params,
-               const PileupReadInfo &p);
-
-KHASH_MAP_INIT_STR (strh,
-                    BaseInfoPair)
-
-void collate_alleles (const NTParams &params,
-                     const PileupReadInfo &p,
-                     khash_t (strh) * t);
-
-void score_single (const BaseInfo b,
-                   const uint64_t c_offset,
-                   int *counts);
-
-int score_pair_biased (const BaseInfoPair info,
-                       const uint64_t param_length,
-                       int *counts);
 
 class BalancedPairCounter {
     /*
