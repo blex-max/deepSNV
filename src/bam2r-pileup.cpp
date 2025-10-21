@@ -23,6 +23,7 @@ Changes:
 */
 
 #include "bam2r-pileup.hpp"
+#include "htslib/hts.h"
 #include "htslib/khash.h"
 #include "htslib/sam.h"
 #include <cstdint>
@@ -113,11 +114,13 @@ void collate_alleles (const NTParams &params,
                                &put_rc); // n.b. khash does not copy the string, so p must not die
     const int to_set = p.rev ? 1 : 0; // indexes into the base values
     const int other = 1 - to_set;
+    uint8_t bs;
     switch (put_rc) {
         case 0:
             // qname seen => set second read
-            if (!(kh_val (t, i).bases[to_set].base == UNDEFINED_VALUE))
-                throw std::runtime_error ("duplicate qname on same strand! " + p.qname);
+            bs = kh_val (t, i).bases[to_set].base;
+            if (bs != UNDEFINED_VALUE)
+                throw std::runtime_error ("duplicate qname on same strand! " + p.qname + "val: " + std::to_string(bs) + seq_nt16_str[bs]);
             if (kh_val (t, i).bases[other].base == UNDEFINED_VALUE)
                 throw std::runtime_error ("khash value malformed! " + p.qname);
             base_set (kh_val (t, i).bases[to_set], params, p);
@@ -214,7 +217,7 @@ int bam2R_pileup_function (const bam_pileup1_t *pileups_ptr,
             collate_alleles (nttable.params, pinfo, collated_pileup);
         } catch (std::exception &e) {
             kh_destroy (strh, collated_pileup);
-            throw std::runtime_error(e.what());
+            throw std::runtime_error (e.what());
             return 1; // fail
         }
     }
