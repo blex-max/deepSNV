@@ -114,13 +114,15 @@ void collate_alleles (const NTParams &params,
                                &put_rc); // n.b. khash does not copy the string, so p must not die
     const int to_set = p.rev ? 1 : 0; // indexes into the base values
     const int other = 1 - to_set;
-    uint8_t bs;
+    uint8_t bts;
+    uint8_t ob;
     switch (put_rc) {
         case 0:
             // qname seen => set second read
-            bs = kh_val (t, i).bases[to_set].base;
-            if (bs != UNDEFINED_VALUE)
-                throw std::runtime_error ("duplicate qname on same strand! " + p.qname + "val: " + std::to_string(bs) + seq_nt16_str[bs]);
+            bts = kh_val (t, i).bases[to_set].base;
+            ob = kh_val (t, i).bases[other].base;
+            if (bts != UNDEFINED_VALUE)
+                throw std::runtime_error ("duplicate qname on same strand! " + p.qname + "val: " + std::to_string(bts) + seq_nt16_str[bts] + "\n" + "other base: " + std::to_string(ob) + seq_nt16_str[ob]);
             if (kh_val (t, i).bases[other].base == UNDEFINED_VALUE)
                 throw std::runtime_error ("khash value malformed! " + p.qname);
             base_set (kh_val (t, i).bases[to_set], params, p);
