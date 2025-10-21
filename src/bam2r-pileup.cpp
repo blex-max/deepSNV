@@ -30,6 +30,7 @@ Changes:
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
+#include <unordered_map>
 
 // htslib 4-bit-encoding values
 
@@ -106,37 +107,35 @@ void base_set (BaseInfo &b,
 
 void collate_alleles (const NTParams &params,
                       const PileupReadInfo &p,
-                      khash_t (strh) * t) {
-    // Update read pair summary hash map
-    // forward member goes into bases[0], reverse into bases[1]
-    int put_rc; // return code from put
-    const khiter_t i = kh_put (strh, t, p.qname.c_str(),
-                               &put_rc); // n.b. khash does not copy the string, so p must not die
-    const int to_set = p.rev ? 1 : 0; // indexes into the base values
+                      std::unordered_map<std::string,
+                                         BaseInfoPair> m) {
+    // forward member goes into bases[0], reverse into bases[1]  (which is probably ill advised)
+    const int to_set = std::clamp ((int)p.rev, 0, 1); // indexes into the base values
     const int other = 1 - to_set;
-    uint8_t bts;
-    uint8_t ob;
-    switch (put_rc) {
-        case 0:
-            // qname seen => set second read
-            bts = kh_val (t, i).bases[to_set].base;
-            ob = kh_val (t, i).bases[other].base;
-            if (bts != UNDEFINED_VALUE)
-                throw std::runtime_error ("duplicate qname on same strand! " + p.qname + "val: " + std::to_string(bts) + seq_nt16_str[bts] + "\n" + "other base: " + std::to_string(ob) + seq_nt16_str[ob]);
-            if (kh_val (t, i).bases[other].base == UNDEFINED_VALUE)
-                throw std::runtime_error ("khash value malformed! " + p.qname);
-            base_set (kh_val (t, i).bases[to_set], params, p);
-            break;
-        case 1: // new qname on rc 1 and 2 => set first read
-        case 2:
-            base_set (kh_val (t, i).bases[to_set], params, p);
-            kh_val (t, i).bases[other].base = UNDEFINED_VALUE;
-            break;
-        case -1:
-            throw std::runtime_error ("Failed to put key into khash!");
-        default:
-            throw std::runtime_error ("Unknown khash return code: " + std::to_string (put_rc));
+
+    auto [kv, qname_unseen] = m.try_emplace (p.qname, BaseInfoPair{});
+
+    BaseInfoPair &pi = kv->second;
+
+    auto b_toset = pi.bases[to_set].base;
+    auto b_oth = pi.bases[other].base;
+
+    if (!qname_unseen) { // qname seen before
+        if (b_toset != UNDEFINED_VALUE) {
+            throw std::runtime_error ("duplicate qname on same strand! " + p.qname +
+                                      "val: " + std::to_string (b_toset) + "/" +
+                                      seq_nt16_str[pi.bases[to_set].base] + "\n" + "other" +
+                                      std::to_string (b_oth) + seq_nt16_str[b_oth]);
+        }
+        if (pi.bases[other].base == UNDEFINED_VALUE) {
+            throw std::runtime_error ("pair map malformed (other strand unset): " + p.qname);
+        }
+    } else {
+        pi.bases[0].base = UNDEFINED_VALUE;
+        pi.bases[1].base = UNDEFINED_VALUE;
     }
+    // fill new
+    base_set (pi.bases[to_set], params, p);
 }
 
 
@@ -211,6 +210,7 @@ int bam2R_pileup_function (const bam_pileup1_t *pileups_ptr,
     // Collate alleles by read pair
     // TODO: consider persisting the hash map across positions
     //  That would save memory allocations but require clean-up.
+    std::unordered_map<std::string, BaseInfoPair> qname_map;
     khash_t (strh) *collated_pileup = kh_init (strh);
     for (int pileup_i = 0; pileup_i < n_pileups; pileup_i++) {
         const bam_pileup1_t htspile = *(pileups_ptr + pileup_i);
