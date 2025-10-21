@@ -109,7 +109,10 @@ void bam2R (char **bamfile,
                 bam_plp_push (buf, b);
             };
             while ((pl = bam_plp_next (buf, &tid, &pos, &n_plp)) != 0) {
-                bam2R_pileup_function (pl, pos, n_plp, nttable);
+                int rc = bam2R_pileup_function (pl, pos, n_plp, nttable);
+                if (rc == 1) {
+                    Rf_error ("pileup callback failed!");
+                }
             }
         }
         if (result < -1) {
