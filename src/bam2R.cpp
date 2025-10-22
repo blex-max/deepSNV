@@ -7,6 +7,7 @@
 #include "R_ext/Print.h"
 #include "bam2r-pileup.hpp"
 #include "deepsnv-prototypes.h"
+#include <cstring>
 
 #define R_NO_REMAP
 #include <Rinternals.h>
@@ -65,7 +66,7 @@ void bam2R (char **bamfile,
     // BAM_FSUPPLEMENTARY;
     int tid, pos, n_plp = -1;
     const bam_pileup1_t *pl;
-    if (strcmp (*ref, "") == 0) { // if a region is not specified
+    if (std::strcmp (*ref, "") == 0) { // if a region is not specified
         // Replicate sampileup functionality (uses above mask without supplementary)
         int ret;
         while ((ret = sam_read1 (nttable.in, head, b)) >= 0) {
