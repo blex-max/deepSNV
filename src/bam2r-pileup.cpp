@@ -107,7 +107,7 @@ void collate_alleles (const NTParams &params,
                       const PileupReadInfo &p,
                       std::unordered_map<std::string,
                                          BaseInfoPair> &m) {
-    // forward member goes into bases[0], reverse into bases[1]  (which is probably ill advised)
+    // forward member goes into bases[0], reverse into bases[1]
     const int to_set = std::clamp ((int)p.rev, 0, 1); // indexes into the base values
     const int other = 1 - to_set;
 
