@@ -124,9 +124,6 @@ void collate_alleles (const NTParams &params,
         }
         to_set = 1;
     } else {
-        if (b0 != UNDEFINED_VALUE || b1 != UNDEFINED_VALUE) {
-            throw std::runtime_error ("pair map malformed! " + p.qname);
-        }
         to_set = 0;
     }
     // fill new
