@@ -108,12 +108,14 @@ void collate_alleles (const NTParams &params,
                       std::unordered_map<std::string,
                                          BaseInfoPair> &m) {
     // forward member goes into bases[0], reverse into bases[1]
-    const int to_set = std::clamp ((int)p.rev, 0, 1); // indexes into the base values
+    const int to_set = (int)p.rev; // indexes into the base values
     const int other = 1 - to_set;
 
     // n.b. BaseInfoPair ctor inits .base to UNDEFINED_VALUE
-    auto [kv, qname_new_to_map] = m.try_emplace (p.qname, BaseInfoPair{});
-
+    auto emp= m.emplace(p.qname, BaseInfoPair{});  // could be more efficient
+    auto kv = emp.first;
+    // if there was already a key, emplace fails and nothing inserted.
+    bool qname_new_to_map = emp.second;
     BaseInfoPair &pi = kv->second;
 
     auto b_toset = pi.bases[to_set].base;
