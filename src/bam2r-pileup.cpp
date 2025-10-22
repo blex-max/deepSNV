@@ -23,12 +23,12 @@ Changes:
 */
 
 #include "bam2r-pileup.hpp"
-#include "htslib/khash.h"
 #include "htslib/sam.h"
 #include <cstdint>
 #include <stdexcept>
 #include <stdint.h>
 #include <string>
+#include <unordered_map>
 
 // htslib 4-bit-encoding values
 
@@ -105,32 +105,32 @@ void base_set (BaseInfo &b,
 
 void collate_alleles (const NTParams &params,
                       const PileupReadInfo &p,
-                      khash_t (strh) * t) {
-    // Update read pair summary hash map
-    // first member encountered goes into bases[0], second into bases[1]
-    int put_rc; // return code from put
-    const khiter_t i = kh_put (strh, t, p.qname.c_str(),
-                               &put_rc); // n.b. khash does not copy the string, so p must not die
-    switch (put_rc) {
-        case 0:
-            // qname seen => set second read
-            if (kh_val (t, i).bases[0].base == UNDEFINED_VALUE)
-                throw std::runtime_error ("khash value malformed! " + p.qname);
-            if (!(kh_val (t, i).bases[1].base == UNDEFINED_VALUE))
-                throw std::runtime_error ("khash value malformed or qname seen more than twice! " +
-                                          p.qname);
-            base_set (kh_val (t, i).bases[1], params, p);
-            break;
-        case 1: // new qname on rc 1 and 2 => set first read
-        case 2:
-            base_set (kh_val (t, i).bases[0], params, p);
-            kh_val (t, i).bases[1].base = UNDEFINED_VALUE;
-            break;
-        case -1:
-            throw std::runtime_error ("Failed to put key into khash!");
-        default:
-            throw std::runtime_error ("Unknown khash return code: " + std::to_string (put_rc));
+                      std::unordered_map<std::string,
+                                         BaseInfoPair> &m) {
+    // first seen goes into [0], second into [1]
+
+    // n.b. BaseInfoPair ctor inits .base to UNDEFINED_VALUE
+    auto [kv, qname_new_to_map] = m.try_emplace (p.qname, BaseInfoPair{});
+
+    BaseInfoPair &pi = kv->second;
+
+    auto b0 = pi.bases[0].base;
+    auto b1 = pi.bases[1].base;
+
+    int to_set;
+    if (!qname_new_to_map) { // qname seen before
+        if (b0 == UNDEFINED_VALUE || b1 != UNDEFINED_VALUE) {
+            throw std::runtime_error ("pair map malformed! " + p.qname);
+        }
+        to_set = 1;
+    } else {
+        if (b0 != UNDEFINED_VALUE || b1 != UNDEFINED_VALUE) {
+            throw std::runtime_error ("pair map malformed! " + p.qname);
+        }
+        to_set = 0;
     }
+    // fill new
+    base_set (pi.bases[to_set], params, p);
 }
 
 
@@ -203,29 +203,24 @@ int bam2R_pileup_function (const bam_pileup1_t *pileups_ptr,
     }
 
     // Collate alleles by read pair
-    // TODO: consider persisting the hash map across positions
-    //  That would save memory allocations but require clean-up.
-    khash_t (strh) *collated_pileup = kh_init (strh);
+    std::unordered_map<std::string, BaseInfoPair> qname_map;
     for (int pileup_i = 0; pileup_i < n_pileups; pileup_i++) {
         const bam_pileup1_t htspile = *(pileups_ptr + pileup_i);
         auto pinfo = PileupReadInfo::from_pileup (htspile);
         try {
-            collate_alleles (nttable.params, pinfo, collated_pileup);
+            collate_alleles (nttable.params, pinfo, qname_map);
         } catch (std::exception &e) {
-            kh_destroy (strh, collated_pileup);
-            return 1; // fail
+            throw;
+            // return 1; // fail
         }
     }
 
     // Count
     int *counts = nttable_get_counts (&nttable, pos);
     BalancedPairCounter scr;
-    for (khint_t i = kh_begin (collated_pileup); i != kh_end (collated_pileup); ++i) {
-        if (kh_exist (collated_pileup, i)) {
-            scr.score_pair (kh_val (collated_pileup, i), (uint64_t)nttable.params.len(), counts);
-        }
+    for (auto &[qname, bpair] : qname_map) {
+        scr.score_pair (bpair, (uint64_t)nttable.params.len(), counts);
     }
 
-    kh_destroy (strh, collated_pileup);
     return 0;
 }
