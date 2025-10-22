@@ -110,8 +110,10 @@ void collate_alleles (const NTParams &params,
     // first seen goes into [0], second into [1]
 
     // n.b. BaseInfoPair ctor inits .base to UNDEFINED_VALUE
-    auto [kv, qname_new_to_map] = m.try_emplace (p.qname, BaseInfoPair{});
-
+    auto emp= m.emplace(p.qname, BaseInfoPair{});  // could be more efficient
+    auto kv = emp.first;
+    // if there was already a key, emplace fails and nothing inserted.
+    bool qname_new_to_map = emp.second;
     BaseInfoPair &pi = kv->second;
 
     auto b0 = pi.bases[0].base;
