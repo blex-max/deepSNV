@@ -112,7 +112,7 @@ void collate_alleles (const NTParams &params,
     const int other = 1 - to_set;
 
     // n.b. BaseInfoPair ctor inits .base to UNDEFINED_VALUE
-    auto [kv, qname_unseen] = m.try_emplace (p.qname, BaseInfoPair{});
+    auto [kv, qname_new_to_map] = m.try_emplace (p.qname, BaseInfoPair{});
 
     BaseInfoPair &pi = kv->second;
 
@@ -121,7 +121,7 @@ void collate_alleles (const NTParams &params,
     // std::string debug_toset = (b_toset == UNDEFINED_VALUE) ? "UNDEF" : std::string(&seq_nt16_str[b_toset]);
     // std::string debug_oth = (b_oth == UNDEFINED_VALUE) ? "UNDEF" : std::string(&seq_nt16_str[b_oth]);
 
-    if (!qname_unseen) { // qname seen before
+    if (!qname_new_to_map) { // qname seen before
         if (b_toset != UNDEFINED_VALUE) {
             throw std::runtime_error ("duplicate qname on same strand! " + p.qname);
         }
