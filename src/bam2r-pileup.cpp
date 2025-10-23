@@ -33,8 +33,8 @@ Changes:
 // htslib 4-bit-encoding values
 
 static const uint8_t base_to_count_field[16] = {
-    COUNT_N, 0,       1,       COUNT_N, 2,       COUNT_N, COUNT_N, COUNT_N,
-    3,       COUNT_N, COUNT_N, COUNT_N, COUNT_N, COUNT_N, COUNT_N, COUNT_N};
+    COUNT_N, COUNT_A, COUNT_C, COUNT_N, COUNT_G, COUNT_N, COUNT_N, COUNT_N,
+    COUNT_T, COUNT_N, COUNT_N, COUNT_N, COUNT_N, COUNT_N, COUNT_N, COUNT_N};
 
 
 #define PILEUP_PAIR_STRIDE 2

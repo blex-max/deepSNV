@@ -9,12 +9,15 @@
 #include <stdexcept>
 #include <string>
 
-#define NT_A 1
-#define NT_C 2
-#define NT_G 4
-#define NT_T 8
-#define AMBIG_NT 255
+#define HTS_NT_A 1
+#define HTS_NT_C 2
+#define HTS_NT_G 4
+#define HTS_NT_T 8
 
+#define COUNT_A 0
+#define COUNT_T 1
+#define COUNT_C 2
+#define COUNT_G 3
 #define COUNT_IS_DEL 4 // *
 #define COUNT_N 5 // N
 #define COUNT_INS 6 // +
@@ -22,6 +25,8 @@
 #define COUNT_HEAD 8 // ^
 #define COUNT_TAIL 9 // $
 #define COUNT_QUALITY 10 // Q
+
+#define UNDEFINED_VALUE UINT8_MAX
 
 // TODO: use the 4 additional bits in the base value for the SET flag
 #define FLAG_UNSET 0
@@ -33,8 +38,6 @@
 #define FLAG_HEAD (1 << 5) // Head
 #define FLAG_TAIL (1 << 6) // Tail
 #define FLAG_IS_DEL (1 << 7) // Is a deleted base
-
-#define UNDEFINED_VALUE UINT8_MAX
 
 
 struct NTParams {
@@ -113,7 +116,7 @@ struct BaseInfo {
         auto pri_flag = get_pileup_flag (params, p);
         uint8_t input_base;
         if ((pri_flag & (FLAG_QUAL_FAIL | FLAG_POS_FAIL)) != 0) { // squash to ambig if fail
-            input_base = AMBIG_NT;
+            input_base = UNDEFINED_VALUE;
         } else {
             input_base = p.base_nt16i;
         }
