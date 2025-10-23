@@ -33,8 +33,8 @@ Changes:
 // htslib 4-bit-encoding values
 
 static const uint8_t base_to_count_field[16] = {
-    COUNT_N, 0,       1,       COUNT_N, 2,       COUNT_N, COUNT_N, COUNT_N,
-    3,       COUNT_N, COUNT_N, COUNT_N, COUNT_N, COUNT_N, COUNT_N, COUNT_N};
+    COUNT_N, COUNT_A, COUNT_C, COUNT_N, COUNT_G, COUNT_N, COUNT_N, COUNT_N,
+    COUNT_T, COUNT_N, COUNT_N, COUNT_N, COUNT_N, COUNT_N, COUNT_N, COUNT_N};
 
 
 #define PILEUP_PAIR_STRIDE 2
@@ -112,7 +112,7 @@ void collate_alleles (const NTParams &params,
     const int other = 1 - to_set;
 
     // n.b. BaseInfoPair ctor inits .base to UNDEFINED_VALUE
-    auto emp= m.emplace(p.qname, BaseInfoPair{});  // could be more efficient
+    auto emp = m.emplace (p.qname, BaseInfoPair{}); // could be more efficient
     auto kv = emp.first;
     // if there was already a key, emplace fails and nothing inserted.
     bool qname_new_to_map = emp.second;
