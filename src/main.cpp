@@ -8,12 +8,6 @@
 
 #include "bam2R.hpp"
 
-struct hts_region {
-    std::string contig;
-    int64_t start;
-    int64_t stop;
-};
-
 int main (int argc,
           char *argv[]) {
     namespace fs = std::filesystem;
