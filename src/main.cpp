@@ -25,40 +25,77 @@ int main (int argc,
     int mq = 25;
     int bq = 30;
     int exclude_flag = 3844;
-    int max_depth = 100000;
+    int max_depth = 1000000;
     int head_clip = 0;
-    int keepflag = 0;
+    int keep_flag = 0;
     int max_mismatch = 0; // ???
 
     try {
-        // clang-format off
-        cxxopts::Options options ("count-alleles" "cxx only implementation of bam2R");
+        cxxopts::Options options (
+            "count-alleles",
+            "c++ implementation of bam2R\n\n"
+            "Where reference names contain colons, surround in curly "
+            "braces like {HLA-DRB1*12:17}:<start>-<end>\n\n"
 
+            "chr1:100 is treated as the single base pair region "
+            "chr1:100-100.\n"
+            "chr1:-100 is shorthand for chr1:1-100 and chr1:100- is "
+            "ch1:100-<end>\n.");
+
+        // clang-format off
         options.add_options()
             ("aln", "", cxxopts::value<fs::path>())  // positional
-
-            ("r,region", "region specification as string chr:start-stop", cxxopts::value<std::string>())
+            ("region", "", cxxopts::value<std::string>())
 
             // parameters
+            ("b,baseq",
+             "Minimum base quality to treat base as unambiguous. (default 30)",
+             cxxopts::value<int>())
             ("m,mapq",
-             "Minimum mapping quality",
-             cxxopts::value<double>())
+             "Minimum mapping quality to include read (default 25)",
+             cxxopts::value<int>())
+            ("c,clip",
+             "Treat bases within <clip> bases of read edges as ambiguous. (default 0)",
+             cxxopts::value<int>())
+            ("e,exclude",
+             "Exclude reads with any bits set in sam flag. Provide flag as integer. (default 3844)",
+             cxxopts::value<int>())
+            ("d,depth",
+             "Maximum read depth (default 1000000)",
+             cxxopts::value<int>())
 
             ("h,help", "Print usage");
         // clang-format on
 
         options.parse_positional ({"aln", "region"});
-        options.positional_help ("<ALN> region-str");
-        auto result = options.parse (argc, argv);
+        options.positional_help ("<.BAM/.CRAM> chr:start-end");
+        auto parsed_args = options.parse (argc, argv);
 
-        if ((!result.count ("aln")) || (!result.count ("region")) ||
-            result.count ("help")) {
+        if ((!parsed_args.count ("aln")) ||
+            (!parsed_args.count ("region")) ||
+            parsed_args.count ("help")) {
             std::cout << options.help() << std::endl;
             return 0; // nothing given nothing done
         }
 
-        aln_path = result["aln"].as<fs::path>();
-        region_str = result["region"].as<std::string>();
+        aln_path = parsed_args["aln"].as<fs::path>();
+        region_str = parsed_args["region"].as<std::string>();
+
+        if (parsed_args.count ("baseq")) {
+            bq = parsed_args["baseq"].as<int>();
+        }
+        if (parsed_args.count ("mapq")) {
+            mq = parsed_args["mapq"].as<int>();
+        }
+        if (parsed_args.count ("clip")) {
+            head_clip = parsed_args["clip"].as<int>();
+        }
+        if (parsed_args.count ("exclude")) {
+            exclude_flag = parsed_args["exclude"].as<int>();
+        }
+        if (parsed_args.count ("depth")) {
+            bq = parsed_args["baseq"].as<int>();
+        }
 
         if (region_str.empty())
             throw std::runtime_error (
@@ -85,7 +122,7 @@ int main (int argc,
 
         printf ("%s\n", region_str.c_str());
         auto rp = sam_parse_region (head, region_str.c_str(), &tid,
-                                    &beg, &end, 0);
+                                    &beg, &end, HTS_PARSE_ONE_COORD);
         if (rp == NULL) {
             std::string msg;
             switch (tid) {
@@ -115,7 +152,7 @@ int main (int argc,
     try {
         auto result =
             bam2R (aln_in, aln_path, tid, beg, end, bq, mq, head_clip,
-                   max_depth, exclude_flag, keepflag, max_mismatch);
+                   max_depth, exclude_flag, keep_flag, max_mismatch);
     } catch (std::exception &e) {
         std::cerr << "Error during calculation: " << e.what()
                   << std::endl;
