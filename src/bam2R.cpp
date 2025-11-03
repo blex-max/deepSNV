@@ -9,6 +9,7 @@
 #include <stdexcept>
 
 #include "bam2R.hpp"
+#include "bounds.hpp"
 
 
 static inline int64_t getNM (const bam1_t *b,
@@ -23,32 +24,35 @@ static inline int64_t getNM (const bam1_t *b,
 }
 
 
-void bam2R (htsFile *aln_read,
+int *bam2R (htsFile *aln_read,
             std::string aln_fp,
             int tid,
             int64_t beg,
             int64_t end,
-            int *counts,
             int q,
             int mq,
             int head_clip,
             int maxdepth,
-            int mask,
-            int keepflag,
+            int exclude_flag,
+            int keep_flag,
             int maxmismatches) {
     bam_plp_t buf = NULL;
     bam1_t *b = NULL;
     bam_hdr_t *head = NULL;
 
     const NTParams params{beg - 1, end, q, head_clip};
+
+    safe_size_opts sso; // I wish we were on >C++17
+    sso.msg = "error calculating size of counts array";
+    size_t rsize = safe_size ((end - beg + 1) * 11 * 2, sso);
+    // must use new if to return this array
+    int *counts = new int[rsize]; // I'd rather use a vector, but for
+                                  // the sake of less change
+
     NTTable nttable{params, counts, aln_read};
 
     int64_t maxNM = (maxmismatches != -1) ? maxmismatches : INT64_MAX;
     unsigned long long no_NM_count = 0;
-
-    if (nttable.in == 0) {
-        throw std::runtime_error ("Fail to open input BAM/CRAM file");
-    }
 
     buf = bam_plp_init (
         0,
@@ -56,11 +60,6 @@ void bam2R (htsFile *aln_read,
                                          // why is nttable passed here
     bam_plp_set_maxcnt (buf, maxdepth);
     b = bam_init1();
-    head = sam_hdr_read (nttable.in);
-    if (head == NULL) {
-        throw std::runtime_error (
-            "failed to get header from alignment file");
-    }
     // int mask = BAM_FUNMAP | BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP
     // | BAM_FSUPPLEMENTARY;
     int pos, n_plp = -1;
@@ -78,7 +77,7 @@ void bam2R (htsFile *aln_read,
                                       nttable.params.end);
     int result;
     while ((result = sam_itr_next (nttable.in, iter, b)) >= 0) {
-        if ((b->core.flag & mask) == 0 &&
+        if ((b->core.flag & exclude_flag) == 0 &&
             b->core.qual >= mq) { // as 1.27.1 if these conds only
             // (b->core.flag & *keepflag) == *keepflag &&
             // getNM (b, no_NM_count) <= maxNM) {
@@ -114,4 +113,6 @@ void bam2R (htsFile *aln_read,
     bam_hdr_destroy (head);
     bam_plp_destroy (buf);
     hts_close (nttable.in);
+
+    return counts;
 }

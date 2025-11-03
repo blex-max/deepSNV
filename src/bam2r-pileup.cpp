@@ -69,8 +69,8 @@ static const uint8_t reverse_to_flag[2] = {FLAG_UNSET, FLAG_REV};
 /* HELPER FUNCTIONS */
 
 
-static int nttable_get_offset (const NTTable *nttable,
-                               const int pos) {
+static int64_t nttable_get_offset (const NTTable *nttable,
+                               const int64_t pos) {
     // TODO: boundary check
     return pos - nttable->params.beg;
 }

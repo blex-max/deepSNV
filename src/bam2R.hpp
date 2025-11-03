@@ -1,16 +1,16 @@
+#include <htslib/hts.h>
 #include <string>
 
 
-void bam2R (std::string bamfile,
-            std::string contig,
-            int beg,
-            int end,
-            int *counts,
+int *bam2R (htsFile *aln_read,
+            std::string aln_fp,
+            int tid,
+            int64_t beg,
+            int64_t end,
             int q,
             int mq,
             int head_clip,
             int maxdepth,
-            int verbose,
-            int mask,
-            int keepflag,
+            int exclude_flag,
+            int keep_flag,
             int maxmismatches);
