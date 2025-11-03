@@ -4,13 +4,12 @@
  * Copyright (C) 2015-2018 drjsanger@github
  ***********************************************************************/
 
-#include "R_ext/Print.h"
 #include "bam2r-pileup.hpp"
-#include "deepsnv-prototypes.h"
 #include <cstring>
+#include <stdexcept>
 
-#define R_NO_REMAP
-#include <Rinternals.h>
+#include "bam2R.hpp"
+
 
 static inline int64_t getNM (const bam1_t *b,
                              unsigned long long &count) {
@@ -23,105 +22,80 @@ static inline int64_t getNM (const bam1_t *b,
     }
 }
 
-extern "C" {
 
-void bam2R (char **bamfile,
-            char **ref,
-            int *beg,
-            int *end,
+void bam2R (htsFile *aln_read,
+            std::string aln_fp,
+            int tid,
+            int64_t beg,
+            int64_t end,
             int *counts,
-            int *q,
-            int *mq,
-            int *s,
-            int *head_clip,
-            int *maxdepth,
-            int *verbose,
-            int *mask,
-            int *keepflag,
-            int *maxmismatches) {
+            int q,
+            int mq,
+            int head_clip,
+            int maxdepth,
+            int mask,
+            int keepflag,
+            int maxmismatches) {
     bam_plp_t buf = NULL;
     bam1_t *b = NULL;
     bam_hdr_t *head = NULL;
 
-    const NTParams params{*beg - 1, *end, *q, *head_clip};
-    NTTable nttable{params, counts, hts_open (*bamfile, "r")};
-    // nttable.s = *s; //Strand (2=both) - does nothing
-    // nttable.i = 0;  // does nothing
+    const NTParams params{beg - 1, end, q, head_clip};
+    NTTable nttable{params, counts, aln_read};
 
-    int64_t maxNM = (*maxmismatches != -1) ? *maxmismatches : INT64_MAX;
+    int64_t maxNM = (maxmismatches != -1) ? maxmismatches : INT64_MAX;
     unsigned long long no_NM_count = 0;
 
     if (nttable.in == 0) {
-        Rf_error ("Fail to open input BAM/CRAM file %s\n", *bamfile);
+        throw std::runtime_error ("Fail to open input BAM/CRAM file");
     }
 
-    buf = bam_plp_init (0, (void *)&nttable); // initialize pileup ALEX: why is nttable passed here
-    bam_plp_set_maxcnt (buf, *maxdepth);
+    buf = bam_plp_init (
+        0,
+        static_cast<void *> (&nttable)); // initialize pileup ALEX:
+                                         // why is nttable passed here
+    bam_plp_set_maxcnt (buf, maxdepth);
     b = bam_init1();
     head = sam_hdr_read (nttable.in);
     if (head == NULL) {
-        Rf_error ("failed to get header from alignment file");
+        throw std::runtime_error (
+            "failed to get header from alignment file");
     }
-    // int mask = BAM_FUNMAP | BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP |
-    // BAM_FSUPPLEMENTARY;
-    int tid, pos, n_plp = -1;
+    // int mask = BAM_FUNMAP | BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP
+    // | BAM_FSUPPLEMENTARY;
+    int pos, n_plp = -1;
     const bam_pileup1_t *pl;
-    if (std::strcmp (*ref, "") == 0) { // if a region is not specified
-        // Replicate sampileup functionality (uses above mask without supplementary)
-        int ret;
-        while ((ret = sam_read1 (nttable.in, head, b)) >= 0) {
-            if ((b->core.flag & *mask) == 0 &&
-                 b->core.qual >= *mq) {  // as 1.27.1 if these conds only
-                // (b->core.flag & *keepflag) == *keepflag &&
-                // getNM (b, no_NM_count) <= maxNM) {
-                bam_plp_push (buf, b);
-            };
-            while ((pl = bam_plp_next (buf, &tid, &pos, &n_plp)) != 0) {
-                int rc = bam2R_pileup_function (pl, pos, n_plp, nttable);
-                if (rc == 1) {
-                    Rf_error ("pileup callback failed!");
-                }
-            }
-        }
-    } else {
-        int tid;
-        hts_idx_t *idx;
-        idx = sam_index_load (nttable.in, *bamfile); // load BAM index
-        if (idx == 0) {
-            Rf_error ("BAM/CRAM index file is not available.\n");
-        }
-        tid = bam_name2id (head, *ref);
-        if (tid < 0) {
-            Rf_error ("Invalid sequence %s\n", *ref);
-        }
-
-        if (*verbose)
-            Rprintf ("Reading %s, %s:%d-%d\n", *bamfile, *ref, nttable.params.beg + 1,
-                     nttable.params.end);
-
-        // Implement a fetch style iterator
-        hts_itr_t *iter = sam_itr_queryi (idx, tid, nttable.params.beg, nttable.params.end);
-        int result;
-        while ((result = sam_itr_next (nttable.in, iter, b)) >= 0) {
-            if ((b->core.flag & *mask) == 0 &&
-                 b->core.qual >= *mq) {  // as 1.27.1 if these conds only
-                // (b->core.flag & *keepflag) == *keepflag &&
-                // getNM (b, no_NM_count) <= maxNM) {
-                bam_plp_push (buf, b);
-            };
-            while ((pl = bam_plp_next (buf, &tid, &pos, &n_plp)) != 0) {
-                int rc = bam2R_pileup_function (pl, pos, n_plp, nttable);
-                if (rc == 1) {
-                    Rf_error ("pileup callback failed!");
-                }
-            }
-        }
-        if (result < -1) {
-            Rf_error ("Error code (%d) encountered reading sam iterator.\n", result);
-        }
-        sam_itr_destroy (iter);
-        hts_idx_destroy (idx);
+    hts_idx_t *idx;
+    idx = sam_index_load (nttable.in,
+                          aln_fp.c_str()); // load BAM index
+    if (idx == 0) {
+        throw std::runtime_error (
+            "BAM/CRAM index file is not available.\n");
     }
+
+    // Implement a fetch style iterator
+    hts_itr_t *iter = sam_itr_queryi (idx, tid, nttable.params.beg,
+                                      nttable.params.end);
+    int result;
+    while ((result = sam_itr_next (nttable.in, iter, b)) >= 0) {
+        if ((b->core.flag & mask) == 0 &&
+            b->core.qual >= mq) { // as 1.27.1 if these conds only
+            // (b->core.flag & *keepflag) == *keepflag &&
+            // getNM (b, no_NM_count) <= maxNM) {
+            bam_plp_push (buf, b);
+        };
+        while ((pl = bam_plp_next (buf, &tid, &pos, &n_plp)) != 0) {
+            int rc = bam2R_pileup_function (pl, pos, n_plp, nttable);
+            if (rc == 1) {
+                throw std::runtime_error ("pileup callback failed!");
+            }
+        }
+    }
+    if (result < -1) {
+        throw std::runtime_error ("Error reading sam iterator.\n");
+    }
+    sam_itr_destroy (iter);
+    hts_idx_destroy (idx);
 
     bam_plp_push (buf, 0); // finalize pileup
 
@@ -129,10 +103,11 @@ void bam2R (char **bamfile,
         bam2R_pileup_function (pl, pos, n_plp, nttable);
     }
 
-    if (*maxmismatches != -1 && no_NM_count > 0) {
-        Rf_warning ("%llu reads did not have NM tags; max.mismatches filter was not "
-                    "applied to them.\n",
-                    no_NM_count);
+    if (maxmismatches != -1 && no_NM_count > 0) {
+        printf ("%llu reads did not have NM tags; max.mismatches "
+                "filter was not "
+                "applied to them.\n",
+                no_NM_count);
     }
 
     bam_destroy1 (b);
@@ -140,5 +115,3 @@ void bam2R (char **bamfile,
     bam_plp_destroy (buf);
     hts_close (nttable.in);
 }
-
-} // extern "C"

@@ -43,10 +43,11 @@
 struct NTParams {
     // fixed params
     // removed s param as never used
-    const int beg, end, bq_bound, head_clip_bound;
+    const int64_t beg, end;
+    const int bq_bound, head_clip_bound;
 
-    NTParams (int beg,
-              int end,
+    NTParams (int64_t beg,
+              int64_t end,
               int bq_bound,
               int head_clip_bound)
         : beg (beg),
@@ -58,7 +59,7 @@ struct NTParams {
         }
     }
 
-    int len () const noexcept { return end - beg; }
+    int64_t len () const noexcept { return end - beg; }
 };
 
 constexpr int N_COUNTS_FIELD = 11;
