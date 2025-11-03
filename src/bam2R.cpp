@@ -5,6 +5,7 @@
  ***********************************************************************/
 
 #include "bam2r-pileup.hpp"
+#include <cstdint>
 #include <cstring>
 #include <stdexcept>
 
@@ -12,30 +13,33 @@
 #include "bounds.hpp"
 
 
-static inline int64_t getNM (const bam1_t *b,
-                             unsigned long long &count) {
-    const uint8_t *nm = bam_aux_get (b, "NM");
-    if (nm)
-        return bam_aux2i (nm);
-    else {
-        count++;
-        return 0; // Dummy NM value that always passes the filter
-    }
-}
+// static inline int64_t getNM (const bam1_t *b,
+//                              unsigned long long &count) {
+//     const uint8_t *nm = bam_aux_get (b, "NM");
+//     if (nm)
+//         return bam_aux2i (nm);
+//     else {
+//         count++;
+//         return 0; // Dummy NM value that always passes the filter
+//     }
+// }
 
 
-int *bam2R (htsFile *aln_read,
-            std::string aln_fp,
-            int tid,
-            int64_t beg,
-            int64_t end,
-            int q,
-            int mq,
-            int head_clip,
-            int maxdepth,
-            int exclude_flag,
-            int keep_flag,
-            int maxmismatches) {
+std::pair<size_t,
+          int *>
+    bam2R (htsFile *aln_read,
+           std::string aln_fp,
+           int tid,
+           int64_t beg,
+           int64_t end,
+           int q,
+           int mq,
+           int head_clip,
+           int maxdepth,
+           int exclude_flag
+           // int keep_flag,
+           // int maxmismatches
+    ) {
     bam_plp_t buf = NULL;
     bam1_t *b = NULL;
     bam_hdr_t *head = NULL;
@@ -51,8 +55,8 @@ int *bam2R (htsFile *aln_read,
 
     NTTable nttable{params, counts, aln_read};
 
-    int64_t maxNM = (maxmismatches != -1) ? maxmismatches : INT64_MAX;
-    unsigned long long no_NM_count = 0;
+    // int64_t maxNM = (maxmismatches != -1) ? maxmismatches :
+    // INT64_MAX; unsigned long long no_NM_count = 0;
 
     buf = bam_plp_init (
         0,
@@ -62,7 +66,8 @@ int *bam2R (htsFile *aln_read,
     b = bam_init1();
     // int mask = BAM_FUNMAP | BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP
     // | BAM_FSUPPLEMENTARY;
-    int pos, n_plp = -1;
+    int64_t pos = -1;
+    int n_plp = -1;
     const bam_pileup1_t *pl;
     hts_idx_t *idx;
     idx = sam_index_load (nttable.in,
@@ -83,8 +88,13 @@ int *bam2R (htsFile *aln_read,
             // getNM (b, no_NM_count) <= maxNM) {
             bam_plp_push (buf, b);
         };
-        while ((pl = bam_plp_next (buf, &tid, &pos, &n_plp)) != 0) {
-            int rc = bam2R_pileup_function (pl, pos, n_plp, nttable);
+        while ((pl = bam_plp64_next (buf, &tid, &pos, &n_plp)) !=
+               NULL) {
+            if (n_plp < 0) {
+                throw std::runtime_error ("pileup failed");
+            }
+            int rc = bam2R_pileup_function (
+                pl, pos, safe_size (n_plp), nttable);
             if (rc == 1) {
                 throw std::runtime_error ("pileup callback failed!");
             }
@@ -97,22 +107,24 @@ int *bam2R (htsFile *aln_read,
     hts_idx_destroy (idx);
 
     bam_plp_push (buf, 0); // finalize pileup
-
-    while ((pl = bam_plp_next (buf, &tid, &pos, &n_plp)) != 0) {
-        bam2R_pileup_function (pl, pos, n_plp, nttable);
+    while ((pl = bam_plp64_next (buf, &tid, &pos, &n_plp)) != 0) {
+        if (n_plp < 0) {
+            throw std::runtime_error ("pileup flush failed");
+        }
+        bam2R_pileup_function (pl, pos, safe_size (n_plp), nttable);
     }
 
-    if (maxmismatches != -1 && no_NM_count > 0) {
-        printf ("%llu reads did not have NM tags; max.mismatches "
-                "filter was not "
-                "applied to them.\n",
-                no_NM_count);
-    }
+    // if (maxmismatches != -1 && no_NM_count > 0) {
+    //     printf ("%llu reads did not have NM tags; max.mismatches "
+    //             "filter was not "
+    //             "applied to them.\n",
+    //             no_NM_count);
+    // }
 
     bam_destroy1 (b);
     bam_hdr_destroy (head);
     bam_plp_destroy (buf);
     hts_close (nttable.in);
 
-    return counts;
+    return std::pair (rsize, counts);
 }

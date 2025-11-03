@@ -3,10 +3,10 @@
 #ifndef BAM2R_PILEUP_H
 #define BAM2R_PILEUP_H
 
+#include "bounds.hpp"
 #include "htslib/hts.h"
 #include "htslib/sam.h"
 #include <cstdint>
-#include <stdexcept>
 #include <string>
 
 #define HTS_NT_A 1
@@ -44,6 +44,7 @@ struct NTParams {
     // fixed params
     // removed s param as never used
     const int64_t beg, end;
+    const size_t len;
     const int bq_bound, head_clip_bound;
 
     NTParams (int64_t beg,
@@ -52,14 +53,13 @@ struct NTParams {
               int head_clip_bound)
         : beg (beg),
           end (end),
+          len ([&] {
+              safe_size_opts sso;
+              sso.msg = "error calculating length of NTParams";
+              return safe_size (end - beg, sso);
+          }()),
           bq_bound (bq_bound),
-          head_clip_bound (head_clip_bound) {
-        if (!(end > beg)) {
-            throw std::invalid_argument ("end must be greater than beginning");
-        }
-    }
-
-    int64_t len () const noexcept { return end - beg; }
+          head_clip_bound (head_clip_bound) {}
 };
 
 constexpr int N_COUNTS_FIELD = 11;
@@ -116,7 +116,8 @@ struct BaseInfo {
                      const NTParams &params) {
         auto pri_flag = get_pileup_flag (params, p);
         uint8_t input_base;
-        if ((pri_flag & (FLAG_QUAL_FAIL | FLAG_POS_FAIL)) != 0) { // squash to ambig if fail
+        if ((pri_flag & (FLAG_QUAL_FAIL | FLAG_POS_FAIL)) !=
+            0) { // squash to ambig if fail
             input_base = UNDEFINED_VALUE;
         } else {
             input_base = p.base_nt16i;
@@ -134,23 +135,24 @@ struct BaseInfoPair {
 
 class BalancedPairCounter {
     /*
-	If calls are equivalent (ish), alternate between counting first seen and second seen.
-	Does not directly account for strand
-	Does not consider equivalence beyond same base - though all qual/pos fails are converted
-	into ambiguous bases upstream so the better call will always be taken.
-	But no opinion on is_tail, is_head, etc.
-	*/
+        If calls are equivalent (ish), alternate between counting
+       first seen and second seen. Does not directly account for
+       strand Does not consider equivalence beyond same base - though
+       all qual/pos fails are converted into ambiguous bases upstream
+       so the better call will always be taken. But no opinion on
+       is_tail, is_head, etc.
+        */
     bool pair_toggle = true;
 
   public:
     void score_pair (const BaseInfoPair info,
-                     const uint64_t param_length,
+                     const size_t param_length,
                      int *counts);
 };
 
 int bam2R_pileup_function (const bam_pileup1_t *pileups_ptr,
-                           int pos,
-                           int n_pileups,
+                           int64_t pos,
+                           size_t n_pileups,
                            NTTable &nttable);
 
 #endif

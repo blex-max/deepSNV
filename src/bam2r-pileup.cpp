@@ -7,14 +7,14 @@
 if a base fails filters store base as ambiguous (N).
 NOTE: initially tried different code for incoming ambiguous (N), and
 ambiguous due to these filters (255), but that meant that overlapping
-ambiguous bases from read pairs would be double counted since the different
-reasons for ambiguity aren't reflected in the counts array. This was
-discussed and it was decided that this should not occur. NOTE: this
-implementation means an overlapping base encountered after a good base that
-fails these filters, and is therefore flipped to N/15, is treated as a
-different base and therefore increments the ambiguous counter in the
-results array. This has been discussed and determined to be the correct
-approach (subject to testing).
+ambiguous bases from read pairs would be double counted since the
+different reasons for ambiguity aren't reflected in the counts array.
+This was discussed and it was decided that this should not occur.
+NOTE: this implementation means an overlapping base encountered after
+a good base that fails these filters, and is therefore flipped to
+N/15, is treated as a different base and therefore increments the
+ambiguous counter in the results array. This has been discussed and
+determined to be the correct approach (subject to testing).
 */
 
 /*
@@ -23,6 +23,7 @@ Changes:
 */
 
 #include "bam2r-pileup.hpp"
+#include "bounds.hpp"
 #include "htslib/sam.h"
 #include <cstdint>
 #include <stdexcept>
@@ -33,8 +34,9 @@ Changes:
 // htslib 4-bit-encoding values
 
 static const uint8_t base_to_count_field[16] = {
-    COUNT_N, COUNT_A, COUNT_C, COUNT_N, COUNT_G, COUNT_N, COUNT_N, COUNT_N,
-    COUNT_T, COUNT_N, COUNT_N, COUNT_N, COUNT_N, COUNT_N, COUNT_N, COUNT_N};
+    COUNT_N, COUNT_A, COUNT_C, COUNT_N, COUNT_G, COUNT_N,
+    COUNT_N, COUNT_N, COUNT_T, COUNT_N, COUNT_N, COUNT_N,
+    COUNT_N, COUNT_N, COUNT_N, COUNT_N};
 
 
 #define PILEUP_PAIR_STRIDE 2
@@ -62,37 +64,49 @@ static const uint8_t indel_to_flag[3] = {
     [2] = FLAG_FINS // positive
 };
 
-static const uint8_t position_fail_to_flag[2] = {FLAG_UNSET, FLAG_POS_FAIL};
-static const uint8_t quality_fail_to_flag[2] = {FLAG_UNSET, FLAG_QUAL_FAIL};
+static const uint8_t position_fail_to_flag[2] = {FLAG_UNSET,
+                                                 FLAG_POS_FAIL};
+static const uint8_t quality_fail_to_flag[2] = {FLAG_UNSET,
+                                                FLAG_QUAL_FAIL};
 static const uint8_t reverse_to_flag[2] = {FLAG_UNSET, FLAG_REV};
 
 /* HELPER FUNCTIONS */
 
 
-static int64_t nttable_get_offset (const NTTable *nttable,
-                               const int64_t pos) {
-    // TODO: boundary check
-    return pos - nttable->params.beg;
+// NOTE: 3 Nov added bounds check, previously absent
+static size_t nttable_get_offset (const NTTable *nttable,
+                                  const int64_t pos) {
+    safe_size_opts sso;
+    sso.msg = "error calculating nttable offset";
+    sso.upper = nttable->params.len;
+    return safe_size (pos - nttable->params.beg, sso);
 }
 
 static int *nttable_get_counts (const NTTable *nttable,
-                                const int pos) {
+                                const int64_t pos) {
     return nttable->counts + nttable_get_offset (nttable, pos);
 }
 
 uint8_t get_pileup_flag (const NTParams &params,
                          const PileupReadInfo &p) {
-    return bam_pileup_to_flag[p.is_del][p.is_head][p.is_tail] | reverse_to_flag[p.rev] |
+    return bam_pileup_to_flag[p.is_del][p.is_head][p.is_tail] |
+        reverse_to_flag[p.rev] |
         indel_to_flag[(p.indel > 0) + (p.indel >= 0)] |
         quality_fail_to_flag[p.base_q <= params.bq_bound] |
-        // Position fail (should the test be separate for forward and reverse?)
-        position_fail_to_flag[(p.qpos < params.head_clip_bound ||
-                               (p.base_q && p.qlen - p.qpos < params.head_clip_bound))];
+        // Position fail (should the test be separate for forward and
+        // reverse?)
+        position_fail_to_flag[(
+            p.qpos < params.head_clip_bound ||
+            (p.base_q && p.qlen - p.qpos < params.head_clip_bound))];
 }
 
-uint8_t get_pileup_base (const bam_pileup1_t &p) { return bam_seqi (bam_get_seq (p.b), p.qpos); }
+uint8_t get_pileup_base (const bam_pileup1_t &p) {
+    return bam_seqi (bam_get_seq (p.b), p.qpos);
+}
 
-uint8_t get_pileup_base_quality (const bam_pileup1_t &p) { return bam_get_qual (p.b)[p.qpos]; }
+uint8_t get_pileup_base_quality (const bam_pileup1_t &p) {
+    return bam_get_qual (p.b)[p.qpos];
+}
 
 void base_set (BaseInfo &b,
                const NTParams &params,
@@ -110,7 +124,8 @@ void collate_alleles (const NTParams &params,
     // first seen goes into [0], second into [1]
 
     // n.b. BaseInfoPair ctor inits .base to UNDEFINED_VALUE
-    auto emp= m.emplace(p.qname, BaseInfoPair{});  // could be more efficient
+    auto emp = m.emplace (p.qname,
+                          BaseInfoPair{}); // could be more efficient
     auto kv = emp.first;
     // if there was already a key, emplace fails and nothing inserted.
     bool qname_new_to_map = emp.second;
@@ -122,7 +137,8 @@ void collate_alleles (const NTParams &params,
     int to_set;
     if (!qname_new_to_map) { // qname seen before
         if (b0 == UNDEFINED_VALUE || b1 != UNDEFINED_VALUE) {
-            throw std::runtime_error ("pair map malformed! " + p.qname);
+            throw std::runtime_error ("pair map malformed! " +
+                                      p.qname);
         }
         to_set = 1;
     } else {
@@ -133,46 +149,67 @@ void collate_alleles (const NTParams &params,
 }
 
 
-void score_single (const BaseInfo b,
-                   const uint64_t c_offset,
-                   int *counts) {
-    const uint64_t strand_offset = (b.flag & FLAG_REV) ? c_offset * N_COUNTS_FIELD : 0;
+// TODO:
+// something like this so my mind doesn't explode
+// static int* field_slot(int* base_pos,
+//                               uint64_t len,
+//                               int field,
+//                               bool rev) {
+//     const uint64_t strand_off = rev ? len * N_COUNTS_FIELD : 0;
+//     return base_pos + strand_off + field * len;
+// }
 
-    counts[strand_offset + c_offset * COUNT_HEAD] += (b.flag & FLAG_HEAD) != FLAG_UNSET;
-    counts[strand_offset + c_offset * COUNT_TAIL] += (b.flag & FLAG_TAIL) != FLAG_UNSET;
+void score_single (const BaseInfo b,
+                   const size_t region_length,
+                   int *counts) {
+    const uint64_t strand_offset =
+        (b.flag & FLAG_REV) ? region_length * N_COUNTS_FIELD : 0;
+
+    counts[strand_offset + region_length * COUNT_HEAD] +=
+        (b.flag & FLAG_HEAD) != FLAG_UNSET;
+    counts[strand_offset + region_length * COUNT_TAIL] +=
+        (b.flag & FLAG_TAIL) != FLAG_UNSET;
 
     if (b.flag & FLAG_POS_FAIL) {
-        counts[strand_offset + c_offset * COUNT_N]++;
+        counts[strand_offset + region_length * COUNT_N]++;
     } else {
         if (b.flag & FLAG_IS_DEL) {
-            counts[strand_offset + c_offset * COUNT_IS_DEL]++;
+            counts[strand_offset + region_length * COUNT_IS_DEL]++;
         } else {
             if (b.flag & FLAG_QUAL_FAIL) {
-                counts[strand_offset + c_offset * COUNT_N]++;
+                counts[strand_offset + region_length * COUNT_N]++;
             } else {
                 // ASSUMPTION: base is 4 bit (in [0, 15])
-                counts[strand_offset + c_offset * (uint64_t)base_to_count_field[b.base]]++;
+                counts[strand_offset +
+                       region_length * base_to_count_field[b.base]]++;
             }
 
-            // NOTE: what about multi-base deletions (is_del follwed by negative indel?)?
-            counts[strand_offset + c_offset * COUNT_DEL] += (b.flag & FLAG_FDEL) != 0;
-            counts[strand_offset + c_offset * COUNT_INS] += (b.flag & FLAG_FINS) != 0;
+            // NOTE: what about multi-base deletions (is_del follwed
+            // by negative indel?)?
+            counts[strand_offset + region_length * COUNT_DEL] +=
+                (b.flag & FLAG_FDEL) != 0;
+            counts[strand_offset + region_length * COUNT_INS] +=
+                (b.flag & FLAG_FINS) != 0;
         }
-        counts[strand_offset + c_offset * COUNT_QUALITY] += (int)b.map_quality;
+        counts[strand_offset + region_length * COUNT_QUALITY] +=
+            b.map_quality; // not assessed to be positive, but not
+                           // really important for our needs right now
     }
 }
 
 
 void BalancedPairCounter::score_pair (const BaseInfoPair info,
-                                      const uint64_t param_length,
+                                      const size_t param_length,
                                       int *counts) {
-    // NOTE: the first item is ALWAYS set, because they are set in order of appearence
+    // NOTE: the first item is ALWAYS set, because they are set in
+    // order of appearence
     const BaseInfo a = info.bases[0];
     const BaseInfo b = info.bases[1];
 
     if (b.base != UNDEFINED_VALUE) {
         if (b.base == a.base) {
-            // Same base => alternate between counting one or the other (effect on strand bias)
+            // Same base => alternate between counting one or the
+            // other (effect on strand bias)
             if (pair_toggle) {
                 score_single (a, param_length, counts);
             } else {
@@ -194,8 +231,8 @@ void BalancedPairCounter::score_pair (const BaseInfoPair info,
 
 
 int bam2R_pileup_function (const bam_pileup1_t *pileups_ptr,
-                           int pos,
-                           int n_pileups,
+                           int64_t pos,
+                           size_t n_pileups,
                            NTTable &nttable) {
     if (!(pos >= nttable.params.beg && pos < nttable.params.end)) {
         return 2; // out of range
@@ -203,7 +240,7 @@ int bam2R_pileup_function (const bam_pileup1_t *pileups_ptr,
 
     // Collate alleles by read pair
     std::unordered_map<std::string, BaseInfoPair> qname_map;
-    for (int pileup_i = 0; pileup_i < n_pileups; pileup_i++) {
+    for (size_t pileup_i = 0; pileup_i < n_pileups; ++pileup_i) {
         const bam_pileup1_t htspile = *(pileups_ptr + pileup_i);
         auto pinfo = PileupReadInfo::from_pileup (htspile);
         try {
@@ -218,7 +255,7 @@ int bam2R_pileup_function (const bam_pileup1_t *pileups_ptr,
     int *counts = nttable_get_counts (&nttable, pos);
     BalancedPairCounter scr;
     for (auto &[qname, bpair] : qname_map) {
-        scr.score_pair (bpair, (uint64_t)nttable.params.len(), counts);
+        scr.score_pair (bpair, nttable.params.len, counts);
     }
 
     return 0;

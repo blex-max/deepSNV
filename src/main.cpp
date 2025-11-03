@@ -1,10 +1,13 @@
+#include "bounds.hpp"
 #include <cstddef>
+#include <cstdint>
 #include <cxxopts.hpp>
 #include <htslib/hts.h>
 #include <htslib/sam.h>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "bam2R.hpp"
 
@@ -21,8 +24,8 @@ int main (int argc,
     int exclude_flag = 3844;
     int max_depth = 1000000;
     int head_clip = 0;
-    int keep_flag = 0;
-    int max_mismatch = 0; // ???
+    // int keep_flag = 0;
+    // int max_mismatch = 0; // ???
 
     try {
         cxxopts::Options options (
@@ -101,6 +104,8 @@ int main (int argc,
         return 1;
     }
 
+    // NOTE/BUG: there's a very good chance I introduced an off by
+    // one, check carefully
     htsFile *aln_in;
     bam_hdr_t *head;
     int tid;
@@ -137,23 +142,44 @@ int main (int argc,
         // std::to_string(beg) + " " + std::to_string(end) <<
         // std::endl;
 
+        safe_size_opts sso{};
+        sso.msg = "genomic range invalid";
+        safe_size (end - beg + 1, sso);
 
     } catch (std::exception &e) {
         std::cerr << "Error during setup: " << e.what() << std::endl;
         return 1;
     }
 
+    std::pair<size_t, int *> result;
     try {
-        auto result =
-            bam2R (aln_in, aln_path, tid, beg, end, bq, mq, head_clip,
-                   max_depth, exclude_flag, keep_flag, max_mismatch);
+        result = bam2R (aln_in, aln_path, tid, beg, end, bq, mq,
+                        head_clip, max_depth, exclude_flag);
     } catch (std::exception &e) {
         std::cerr << "Error during calculation: " << e.what()
                   << std::endl;
         return 1;
     }
 
-    // TODO: write array
+    // NOTE/BUG:
+    // Given a 1D vector,
+    // R translates data to a matrix in column major style
+    // i.e. it writes top to bottom in column 0,
+    // then fills column 1]
+    // Hence this data is column major.
+    // At present, the output is just an unformatted
+    // stream of comma separated values
+    // translate into matrix per R
+    // then write out that matrix line by line
+    try {
+        for (size_t i = 0; i < (result.first - 1); ++i)
+            std::cout << result.second[i] << ",";
+        // flush last result without the comma
+        std::cout << result.second[result.first - 1];
+    } catch (std::exception &e) {
+        std::cerr << "Error during write: " << e.what() << std::endl;
+        return 1;
+    }
 
     return 0;
 }
