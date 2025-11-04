@@ -1,16 +1,116 @@
-#include "bounds.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <cxxopts.hpp>
 #include <htslib/hts.h>
 #include <htslib/sam.h>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
-#include <utility>
+#include <vector>
 
-#include "bam2R.hpp"
+#include "bounds.hpp"
+#include "const.hpp"
+#include "pileup.hpp"
 #include "structs.hpp"
+
+
+// static inline int64_t getNM (const bam1_t *b,
+//                              unsigned long long &count) {
+//     const uint8_t *nm = bam_aux_get (b, "NM");
+//     if (nm)
+//         return bam_aux2i (nm);
+//     else {
+//         count++;
+//         return 0; // Dummy NM value that always passes the filter
+//     }
+// }
+
+// bam2R
+inline void count (htsFile *aln_fh,
+                   hts_idx_t *aln_idx,
+                   const hts_region &reg,
+                   const count_params &params,
+                   std::vector<int> &counts
+                   // int keep_flag,
+                   // int maxmismatches
+) {
+    bam_plp_t buf = NULL;
+    bam1_t *b = NULL;
+    bam_hdr_t *head = NULL;
+    AlleleEventCounter aev (reg, params, counts);
+
+    // int64_t maxNM = (maxmismatches != -1) ? maxmismatches :
+    // INT64_MAX; unsigned long long no_NM_count = 0;
+
+    buf = bam_plp_init (0,
+                        NULL); // initialize pileup
+    bam_plp_set_maxcnt (buf, params.max_depth);
+    b = bam_init1();
+    // int mask = BAM_FUNMAP | BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP
+    // | BAM_FSUPPLEMENTARY;
+    int plp_tid = -1;
+    int64_t plp_pos = -1;
+    int n_plp = -1;
+    const bam_pileup1_t *pl;
+
+    // fetch all reads overlapping the query region;
+    // then do a pileup per base for the total region
+    // covered by those retrieved reads;
+    // then count events on those pileups which overlap
+    // the original query region.
+    hts_itr_t *iter =
+        sam_itr_queryi (aln_idx, reg.rid, reg.start, reg.end);
+    int result;
+    while ((result = sam_itr_next (aln_fh, iter, b)) >= 0) {
+        if ((b->core.flag & params.exclude_flag) == 0 &&
+            b->core.qual >=
+                params.min_mapq) { // as 1.27.1 if these conds only
+            // (b->core.flag & *keepflag) == *keepflag &&
+            // getNM (b, no_NM_count) <= maxNM) {
+            bam_plp_push (buf, b);
+        };
+        while ((pl = bam_plp64_next (buf, &plp_tid, &plp_pos,
+                                     &n_plp)) != NULL) {
+            if (n_plp < 0 || plp_tid < 0 || plp_pos < 0) {
+                throw std::runtime_error ("pileup failed");
+            }
+            if (!(plp_pos >= reg.start && plp_pos < reg.end)) {
+                continue;
+            }
+            aev.count_pileup (pl, safe_size (n_plp));
+        }
+    }
+    if (result < -1) {
+        throw std::runtime_error ("Error reading sam iterator.\n");
+    }
+    sam_itr_destroy (iter);
+
+    bam_plp_push (buf, 0); // finalize pileup
+    while ((pl = bam_plp64_next (buf, &plp_tid, &plp_pos, &n_plp)) !=
+           NULL) {
+        if (n_plp < 0) {
+            throw std::runtime_error ("pileup flush failed");
+        }
+        if (!(plp_pos >= reg.start && plp_pos < reg.end)) {
+            continue;
+        }
+        aev.count_pileup (pl, safe_size (n_plp));
+    }
+
+    // if (maxmismatches != -1 && no_NM_count > 0) {
+    //     printf ("%llu reads did not have NM tags; max.mismatches "
+    //             "filter was not "
+    //             "applied to them.\n",
+    //             no_NM_count);
+    // }
+
+    bam_destroy1 (b);
+    bam_hdr_destroy (head);
+    bam_plp_destroy (buf);
+}
+
 
 int main (int argc,
           char *argv[]) {
@@ -74,8 +174,14 @@ int main (int argc,
         auto parsed_args = options.parse (argc, argv);
 
         if ((!parsed_args.count ("aln")) ||
-            (!parsed_args.count ("region")) ||
-            parsed_args.count ("help")) {
+            (!parsed_args.count ("region"))) {
+            std::cout << "incorrect usage: all postional arguments "
+                         "required. Try --help"
+                      << std::endl;
+            return 1;
+        }
+
+        if (parsed_args.count ("help")) {
             std::cout << options.help() << std::endl;
             return 0; // nothing given nothing done
         }
@@ -111,8 +217,10 @@ int main (int argc,
 
     // NOTE/BUG: there's a very good chance I introduced an off by
     // one, check carefully
+    hts_idx_t *idx;
     int tid = -3;
     int64_t start, end;
+    std::vector<int> result;
     try {
         aln_in = hts_open (aln_path.c_str(), "r");
         head = sam_hdr_read (aln_in);
@@ -122,8 +230,9 @@ int main (int argc,
         }
 
         printf ("%s\n", region_str.c_str());
-        auto rp = sam_parse_region (head, region_str.c_str(), &tid,
-                                    &start, &end, HTS_PARSE_ONE_COORD);
+        auto rp =
+            sam_parse_region (head, region_str.c_str(), &tid, &start,
+                              &end, HTS_PARSE_ONE_COORD);
         if (rp == NULL) {
             std::string msg;
             switch (tid) {
@@ -140,38 +249,44 @@ int main (int argc,
                 "parse failed for input region " + region_str +
                 " - " + msg);
         }
-
         // start - 1 cargo culted from bam2R...
-        reg = hts_region::by_end(tid, start - 1, end);
+        reg = hts_region::by_end (tid, start - 1, end);
+
+        idx = sam_index_load (aln_in, aln_path.c_str());
+        if (!idx) {
+            throw std::runtime_error ("failed to load index file");
+        }
+
+        safe_size_opts sso;
+        sso.msg =
+            "error in calculating cells needed for storing result";
+        result.resize (safe_size (static_cast<int64_t> (
+                                      reg.rlen * N_FIELDS_PER_OBS),
+                                  sso),
+                       0);
 
     } catch (std::exception &e) {
         std::cerr << "Error during setup: " << e.what() << std::endl;
         return 1;
     }
 
-    std::pair<size_t, int *> result;
     try {
+        count (aln_in, idx, reg, cp, result);
     } catch (std::exception &e) {
         std::cerr << "Error during calculation: " << e.what()
                   << std::endl;
         return 1;
     }
 
-    // NOTE/BUG:
-    // Given a 1D vector,
-    // R translates data to a matrix in column major style
-    // i.e. it writes top to bottom in column 0,
-    // then fills column 1]
-    // Hence this data is column major.
-    // At present, the output is just an unformatted
-    // stream of comma separated values
-    // translate into matrix per R
-    // then write out that matrix line by line
     try {
-        for (size_t i = 0; i < (result.first - 1); ++i)
-            std::cout << result.second[i] << ",";
-        // flush last result without the comma
-        std::cout << result.second[result.first - 1];
+        for (size_t i = 0; i < result.size(); i += N_FIELDS_PER_OBS) {
+            size_t j = 0;
+            while (j < (N_FIELDS_PER_OBS - 1)) {
+                std::cout << result[i + j] << ",";
+                ++j;
+            }
+            std::cout << result[i + j + 1] << "\n";
+        }
     } catch (std::exception &e) {
         std::cerr << "Error during write: " << e.what() << std::endl;
         return 1;

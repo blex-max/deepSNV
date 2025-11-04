@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "bounds.hpp"
 #include "htslib/sam.h"
 
 #include "const.hpp"
@@ -22,9 +23,6 @@ inline constexpr uint8_t FLAG_FINS =
 inline constexpr uint8_t FLAG_HEAD = (1 << 5); // Head
 inline constexpr uint8_t FLAG_TAIL = (1 << 6); // Tail
 inline constexpr uint8_t FLAG_IS_DEL = (1 << 7); // Is a deleted base
-
-inline constexpr size_t N_COUNTS_FIELD = 11;
-inline constexpr size_t STRAND_OFFSET = N_COUNTS_FIELD;
 
 // htslib 4-bit-encoding values
 inline constexpr uint8_t base_to_count_field[16] = {
@@ -45,12 +43,17 @@ struct PileupReadInfo {
     bool rev, is_del, is_head, is_tail;
 
     static PileupReadInfo from_pileup (const bam_pileup1_t &p) {
+        uint8_t nt = static_cast<uint8_t> (
+            safe_size (bam_seqi (bam_get_seq (p.b), p.qpos),
+                       {0, 15,
+                        "unexpected result when accessing base at "
+                        "pileup postion"}));
         // clang-format off
         return PileupReadInfo{p.qpos,
                               std::string (bam_get_qname (p.b)),
                               p.b->core.l_qseq,
                               p.b->core.qual,
-                              bam_seqi (bam_get_seq (p.b), p.qpos),
+                              nt,
                               bam_get_qual (p.b)[p.qpos],
                               p.indel,
                               bam_is_rev (p.b),
@@ -186,39 +189,40 @@ class AlleleEventCounter {
     void _score_single (const BaseInfo b,
                         const size_t pos) {
         // field accessor that compiler should inline
-        constexpr auto make_idx = [] (const size_t pos) {
-            return [pos] (const size_t field) -> size_t {
-                return pos + (STRAND_OFFSET * field);
+        constexpr auto make_idx = [] (const size_t block_offset) {
+            return [block_offset] (const size_t field) -> size_t {
+                return block_offset + field;
             };
         };
+        auto field = make_idx (
+            pos + ((b.flag & FLAG_REV) ? RSTRAND_OFFSET : 0));
 
-        auto get_field = make_idx (pos);
-        counts[get_field (COUNT_HEAD)] =
+        counts[field (COUNT_HEAD)] =
             (b.flag & FLAG_HEAD) != FLAG_UNSET;
-        counts[get_field (COUNT_TAIL)] =
+        counts[field (COUNT_TAIL)] =
             (b.flag & FLAG_TAIL) != FLAG_UNSET;
 
         if (b.flag & FLAG_POS_FAIL) {
-            counts[get_field (COUNT_N)]++;
+            counts[field (COUNT_N)]++;
         } else {
             if (b.flag & FLAG_IS_DEL) {
-                counts[get_field (COUNT_IS_DEL)]++;
+                counts[field (COUNT_IS_DEL)]++;
             } else {
                 if (b.flag & FLAG_QUAL_FAIL) {
-                    counts[get_field (COUNT_N)]++;
+                    counts[field (COUNT_N)]++;
                 } else {
                     // ASSUMPTION: base is 4 bit (in [0, 15])
-                    counts[get_field (base_to_count_field[b.base])]++;
+                    counts[field (base_to_count_field[b.base])]++;
                 }
 
                 // NOTE: what about multi-base deletions (is_del
                 // follwed by negative indel?)?
-                counts[get_field (COUNT_DEL)] +=
+                counts[field (COUNT_DEL)] +=
                     (b.flag & FLAG_FDEL) != 0;
-                counts[get_field (COUNT_INS)] +=
+                counts[field (COUNT_INS)] +=
                     (b.flag & FLAG_FINS) != 0;
             }
-            counts[get_field (COUNT_MAPQ)] +=
+            counts[field (COUNT_MAPQ)] +=
                 b.map_quality; // not assessed to be positive, but not
                                // really important for our needs right
                                // now
@@ -254,13 +258,8 @@ class AlleleEventCounter {
         pair_toggle = !pair_toggle;
     }
 
-    void count_position (const bam_pileup1_t *pileups_ptr,
-                         const int64_t pos,
+    void count_pileup (const bam_pileup1_t *pileups_ptr,
                          const size_t n_reads) {
-        if (!(pos >= reg.start && pos < reg.end)) {
-            throw std::out_of_range ("pos outside region");
-        }
-
         // Collate alleles by read pair
         std::unordered_map<std::string, BasePairInfo> qname_map;
         for (size_t i = 0; i < n_reads; ++i) {
