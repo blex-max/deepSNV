@@ -17,4 +17,3 @@ compile_commands.json
 build/
 .cache/
 *.scratch
-.clang-format

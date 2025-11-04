@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "bam2R.hpp"
+#include "structs.hpp"
 
 int main (int argc,
           char *argv[]) {
@@ -17,13 +18,17 @@ int main (int argc,
 
     fs::path aln_path;
     std::string region_str;
+    htsFile *aln_in;
+    bam_hdr_t *head;
+    hts_region reg;
+    count_params cp;
 
     // defaults
-    int mq = 25;
-    int bq = 30;
-    int exclude_flag = 3844;
-    int max_depth = 1000000;
-    int head_clip = 0;
+    cp.min_mapq = 25;
+    cp.min_baseq = 30;
+    cp.exclude_flag = 3844;
+    cp.max_depth = 1000000;
+    cp.clip_bound = 0;
     // int keep_flag = 0;
     // int max_mismatch = 0; // ???
 
@@ -78,25 +83,25 @@ int main (int argc,
         aln_path = parsed_args["aln"].as<fs::path>();
         region_str = parsed_args["region"].as<std::string>();
 
-        if (parsed_args.count ("baseq")) {
-            bq = parsed_args["baseq"].as<int>();
-        }
-        if (parsed_args.count ("mapq")) {
-            mq = parsed_args["mapq"].as<int>();
-        }
-        if (parsed_args.count ("clip")) {
-            head_clip = parsed_args["clip"].as<int>();
-        }
-        if (parsed_args.count ("exclude")) {
-            exclude_flag = parsed_args["exclude"].as<int>();
-        }
-        if (parsed_args.count ("depth")) {
-            bq = parsed_args["baseq"].as<int>();
-        }
-
         if (region_str.empty())
             throw std::runtime_error (
                 "region string appears to be empty");
+
+        if (parsed_args.count ("baseq")) {
+            cp.min_baseq = parsed_args["baseq"].as<int>();
+        }
+        if (parsed_args.count ("mapq")) {
+            cp.min_mapq = parsed_args["mapq"].as<int>();
+        }
+        if (parsed_args.count ("clip")) {
+            cp.clip_bound = parsed_args["clip"].as<int>();
+        }
+        if (parsed_args.count ("exclude")) {
+            cp.exclude_flag = parsed_args["exclude"].as<int>();
+        }
+        if (parsed_args.count ("depth")) {
+            cp.max_depth = parsed_args["depth"].as<int>();
+        }
 
     } catch (const std::exception &e) {
         std::cerr << "Error parsing CLI options: " << e.what()
@@ -106,11 +111,8 @@ int main (int argc,
 
     // NOTE/BUG: there's a very good chance I introduced an off by
     // one, check carefully
-    htsFile *aln_in;
-    bam_hdr_t *head;
-    int tid;
-    int64_t beg;
-    int64_t end;
+    int tid = -3;
+    int64_t start, end;
     try {
         aln_in = hts_open (aln_path.c_str(), "r");
         head = sam_hdr_read (aln_in);
@@ -121,7 +123,7 @@ int main (int argc,
 
         printf ("%s\n", region_str.c_str());
         auto rp = sam_parse_region (head, region_str.c_str(), &tid,
-                                    &beg, &end, HTS_PARSE_ONE_COORD);
+                                    &start, &end, HTS_PARSE_ONE_COORD);
         if (rp == NULL) {
             std::string msg;
             switch (tid) {
@@ -138,13 +140,9 @@ int main (int argc,
                 "parse failed for input region " + region_str +
                 " - " + msg);
         }
-        // std::cout << std::to_string(tid) + " " +
-        // std::to_string(beg) + " " + std::to_string(end) <<
-        // std::endl;
 
-        safe_size_opts sso{};
-        sso.msg = "genomic range invalid";
-        safe_size (end - beg + 1, sso);
+        // start - 1 cargo culted from bam2R...
+        reg = hts_region::by_end(tid, start - 1, end);
 
     } catch (std::exception &e) {
         std::cerr << "Error during setup: " << e.what() << std::endl;
@@ -153,8 +151,6 @@ int main (int argc,
 
     std::pair<size_t, int *> result;
     try {
-        result = bam2R (aln_in, aln_path, tid, beg, end, bq, mq,
-                        head_clip, max_depth, exclude_flag);
     } catch (std::exception &e) {
         std::cerr << "Error during calculation: " << e.what()
                   << std::endl;

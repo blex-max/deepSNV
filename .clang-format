@@ -1,0 +1,36 @@
+# .clang-format — calm & spacious cxx
+BasedOnStyle: LLVM
+
+IndentWidth: 4
+UseTab: Never
+
+# arguments/parameters → readable vertical stacking
+ColumnLimit: 70
+BinPackParameters: AlwaysOnePerLine
+AlwaysBreakAfterReturnType: None
+SpaceBeforeParens: Custom
+SpaceBeforeParensOptions:
+  AfterControlStatements: true
+  AfterFunctionDefinitionName: true
+  BeforeNonEmptyParentheses: true
+IndentWrappedFunctionNames: true 
+BreakConstructorInitializers: BeforeColon
+PackConstructorInitializers: Never
+
+DerivePointerAlignment: false
+PointerAlignment: Right
+ReferenceAlignment: Right
+
+# reduce visual noise
+IncludeBlocks: Preserve
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AlignOperands: false
+AlignTrailingComments: false
+
+# misc
+IndentCaseLabels: true
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 2
+# ReflowComments: false
+

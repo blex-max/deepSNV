@@ -13,9 +13,6 @@ pkg_check_modules(CXXOPTS REQUIRED IMPORTED_TARGET cxxopts)
 
 add_executable(count-alleles
   src/main.cpp
-  src/bam2R.cpp
-  src/bam2r-pileup.cpp
-  src/bounds.cpp
 )
 
 target_compile_options(count-alleles PRIVATE
