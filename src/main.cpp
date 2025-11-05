@@ -97,7 +97,6 @@ inline void count (htsFile *aln_fh,
     int plp_tid = -1, n_plp = -1;
     const bam_pileup1_t *pl;
     size_t pos_offset;
-    std::cerr << "made it 98" << std::endl;
     while ((pl = bam_plp64_auto (buf, &plp_tid, &plp_pos, &n_plp)) !=
            0) {
         std::cerr << "plp_pos: " << std::to_string (plp_pos)
