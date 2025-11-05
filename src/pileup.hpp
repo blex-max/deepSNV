@@ -142,16 +142,13 @@ inline void base_set (BaseInfo &b,
 
 class AlleleEventCounter {
   private:
-    const hts_region &reg;
-    const count_params &params;
+    const count_params params;
     std::vector<int> &counts;
 
   public:
-    AlleleEventCounter (const hts_region &reg_,
-                        const count_params &params_,
+    AlleleEventCounter (const count_params params_,
                         std::vector<int> &counts_)
-        : reg (reg_),
-          params (params_),
+        : params (params_),
           counts (counts_) {}
 
     void _collate_alleles (const count_params &par,
@@ -159,7 +156,6 @@ class AlleleEventCounter {
                            std::unordered_map<std::string,
                                               BasePairInfo> &m) {
         // first seen goes into [0], second into [1]
-
         // n.b. BaseInfoPair ctor inits .base to UNDEFINED_VALUE
         auto emp = m.emplace (
             pir.qname, BasePairInfo{}); // could be more efficient
@@ -187,19 +183,21 @@ class AlleleEventCounter {
     }
 
     void _score_single (const BaseInfo b,
-                        const size_t pos) {
+                        const size_t pos_offset) {
         // field accessor that compiler should inline
         constexpr auto make_idx = [] (const size_t block_offset) {
             return [block_offset] (const size_t field) -> size_t {
                 return block_offset + field;
             };
         };
-        auto field = make_idx (
-            pos + ((b.flag & FLAG_REV) ? RSTRAND_OFFSET : 0));
+        auto field =
+            make_idx ((pos_offset * N_FIELDS_PER_OBS) +
+                      ((b.flag & FLAG_REV) ? RSTRAND_OFFSET : 0));
 
-        counts[field (COUNT_HEAD)] =
+
+        counts[field (COUNT_HEAD)] +=
             (b.flag & FLAG_HEAD) != FLAG_UNSET;
-        counts[field (COUNT_TAIL)] =
+        counts[field (COUNT_TAIL)] +=
             (b.flag & FLAG_TAIL) != FLAG_UNSET;
 
         if (b.flag & FLAG_POS_FAIL) {
@@ -230,7 +228,7 @@ class AlleleEventCounter {
     }
 
     void _score_pair (const BasePairInfo &bp,
-                      size_t pos,
+                      size_t pos_offset,
                       int &pair_toggle) {
         // NOTE: the first item is ALWAYS set, because they are set in
         // order of appearence
@@ -244,22 +242,23 @@ class AlleleEventCounter {
         bool bases_differ = (b.base != a.base);
 
         if (bundef) {
-            _score_single (a, pos);
+            _score_single (a, pos_offset);
             return;
         }
 
         if (bases_differ) {
-            _score_single (a, pos);
-            _score_single (b, pos);
+            _score_single (a, pos_offset);
+            _score_single (b, pos_offset);
             return;
         }
 
-        _score_single (pair_toggle ? a : b, pos);
+        _score_single (pair_toggle ? a : b, pos_offset);
         pair_toggle = !pair_toggle;
     }
 
     void count_pileup (const bam_pileup1_t *pileups_ptr,
-                         const size_t n_reads) {
+                       const size_t pos_block_offset,
+                       const size_t n_reads) {
         // Collate alleles by read pair
         std::unordered_map<std::string, BasePairInfo> qname_map;
         for (size_t i = 0; i < n_reads; ++i) {
@@ -271,7 +270,8 @@ class AlleleEventCounter {
         // Count
         int toggle = 0;
         for (auto &[qname, bpair] : qname_map) {
-            _score_pair (bpair, reg.rlen, toggle);
+            _score_pair (bpair, pos_block_offset,
+                         toggle); // rlen is the wrong thing to pass
         }
     }
 };

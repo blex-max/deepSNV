@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(count-alleles CXX)
 
+option(ENABLE_DEBUG_FLAGS "Enable extra debug compile options" OFF)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -31,14 +33,16 @@ target_compile_options(count-alleles PRIVATE
     -Wformat=2
 )
 
-target_compile_options(count-alleles PRIVATE
-  -fsanitize=address,undefined
-  -fno-omit-frame-pointer
-  -O0 -g
-)
-target_link_options(count-alleles PRIVATE
-  -fsanitize=address,undefined
-)
+if(ENABLE_DEBUG_FLAGS)
+  target_compile_options(count-alleles PRIVATE
+    -fsanitize=address,undefined
+    -fno-omit-frame-pointer
+    -O0 -g
+  )
+  target_link_options(count-alleles PRIVATE
+    -fsanitize=address,undefined
+  )
+endif()
 
 target_include_directories(count-alleles PRIVATE
   src

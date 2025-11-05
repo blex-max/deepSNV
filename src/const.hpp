@@ -20,10 +20,9 @@ inline constexpr uint8_t COUNT_HEAD = 8; // ^
 inline constexpr uint8_t COUNT_TAIL = 9; // $
 inline constexpr uint8_t COUNT_MAPQ = 10; // Q
 
-inline constexpr uint8_t UNDEFINED_VALUE = UINT8_MAX;
-
-inline constexpr size_t N_STRAND = 2;
 inline constexpr size_t N_FIELDS_PER_STRAND = 11;
+inline constexpr size_t N_STRAND = 2;
 inline constexpr size_t N_FIELDS_PER_OBS = N_STRAND * N_FIELDS_PER_STRAND;
 inline constexpr size_t RSTRAND_OFFSET = N_FIELDS_PER_STRAND;
 
+inline constexpr uint8_t UNDEFINED_VALUE = UINT8_MAX;

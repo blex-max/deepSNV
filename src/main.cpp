@@ -15,6 +15,9 @@
 #include "pileup.hpp"
 #include "structs.hpp"
 
+constexpr std::string_view HEADER =
+    "A,T,C,G,-,N,INS,DEL,HEAD,TAIL,QUAL,a,t,c,g,_,n,ins,del,head,"
+    "tail,qual";
 
 // static inline int64_t getNM (const bam1_t *b,
 //                              unsigned long long &count) {
@@ -27,11 +30,37 @@
 //     }
 // }
 
+
+// nothing but C please
+struct pf_capture {
+    htsFile *fh;
+    hts_itr_t *it;
+    const count_params *p;
+};
+int pileup_func (void *data,
+                 bam1_t *b) {
+    pf_capture *d = static_cast<pf_capture *> (data);
+    int ret;
+    // find the next good read
+    while (1) {
+        ret = sam_itr_next (d->fh, d->it, b);
+        if (ret < 0) {
+            break; // EOF/err
+        }
+        if (!(b->core.flag & d->p->exclude_flag) &&
+            b->core.qual >= d->p->min_mapq) {
+            break; // found good read
+        };
+    }
+    return ret;
+};
+// end nothing but C
+
 // bam2R
 inline void count (htsFile *aln_fh,
                    hts_idx_t *aln_idx,
-                   const hts_region &reg,
-                   const count_params &params,
+                   const hts_region reg,
+                   const count_params params,
                    std::vector<int> &counts
                    // int keep_flag,
                    // int maxmismatches
@@ -39,64 +68,53 @@ inline void count (htsFile *aln_fh,
     bam_plp_t buf = NULL;
     bam1_t *b = NULL;
     bam_hdr_t *head = NULL;
-    AlleleEventCounter aev (reg, params, counts);
+    AlleleEventCounter aev (params, counts);
+
+    std::cerr << "reg start: " << std::to_string (reg.start)
+              << std::endl;
+    std::cerr << "reg end: " << std::to_string (reg.end) << std::endl;
+    safe_size_opts sso_plp_pos;
+    sso_plp_pos.msg = "error translating htslib pileup position into "
+                      "appropriate index for results array";
 
     // int64_t maxNM = (maxmismatches != -1) ? maxmismatches :
     // INT64_MAX; unsigned long long no_NM_count = 0;
 
-    buf = bam_plp_init (0,
-                        NULL); // initialize pileup
-    bam_plp_set_maxcnt (buf, params.max_depth);
-    b = bam_init1();
-    // int mask = BAM_FUNMAP | BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP
-    // | BAM_FSUPPLEMENTARY;
-    int plp_tid = -1;
-    int64_t plp_pos = -1;
-    int n_plp = -1;
-    const bam_pileup1_t *pl;
-
-    // fetch all reads overlapping the query region;
+    // fetch a read overlapping the query region;
     // then do a pileup per base for the total region
-    // covered by those retrieved reads;
+    // covered by the retrieved read;
     // then count events on those pileups which overlap
     // the original query region.
     hts_itr_t *iter =
         sam_itr_queryi (aln_idx, reg.rid, reg.start, reg.end);
-    int result;
-    while ((result = sam_itr_next (aln_fh, iter, b)) >= 0) {
-        if ((b->core.flag & params.exclude_flag) == 0 &&
-            b->core.qual >=
-                params.min_mapq) { // as 1.27.1 if these conds only
-            // (b->core.flag & *keepflag) == *keepflag &&
-            // getNM (b, no_NM_count) <= maxNM) {
-            bam_plp_push (buf, b);
-        };
-        while ((pl = bam_plp64_next (buf, &plp_tid, &plp_pos,
-                                     &n_plp)) != NULL) {
-            if (n_plp < 0 || plp_tid < 0 || plp_pos < 0) {
-                throw std::runtime_error ("pileup failed");
-            }
-            if (!(plp_pos >= reg.start && plp_pos < reg.end)) {
-                continue;
-            }
-            aev.count_pileup (pl, safe_size (n_plp));
-        }
-    }
-    if (result < -1) {
-        throw std::runtime_error ("Error reading sam iterator.\n");
-    }
-    sam_itr_destroy (iter);
 
-    bam_plp_push (buf, 0); // finalize pileup
-    while ((pl = bam_plp64_next (buf, &plp_tid, &plp_pos, &n_plp)) !=
-           NULL) {
-        if (n_plp < 0) {
-            throw std::runtime_error ("pileup flush failed");
+    pf_capture pfc{aln_fh, iter, &params};
+    buf = bam_plp_init (pileup_func,
+                        &pfc); // initialize pileup
+    bam_plp_set_maxcnt (buf, params.max_depth);
+
+    int64_t plp_pos = -1;
+    int plp_tid = -1, n_plp = -1;
+    const bam_pileup1_t *pl;
+    size_t pos_offset;
+    std::cerr << "made it 98" << std::endl;
+    while ((pl = bam_plp64_auto (buf, &plp_tid, &plp_pos, &n_plp)) !=
+           0) {
+        std::cerr << "plp_pos: " << std::to_string (plp_pos)
+                  << std::endl;
+        if (n_plp < 0 || plp_tid < 0 || plp_pos < 0) {
+            throw std::runtime_error ("pileup failed");
         }
         if (!(plp_pos >= reg.start && plp_pos < reg.end)) {
+            std::cerr << "skipping" << std::endl;
             continue;
         }
-        aev.count_pileup (pl, safe_size (n_plp));
+        pos_offset = safe_size (plp_pos - reg.start, sso_plp_pos);
+        std::cerr << "counting plp_pos: " << std::to_string (plp_pos)
+                  << " to offset start: "
+                  << std::to_string (pos_offset) << std::endl;
+        std::cerr << "n_plp: " << std::to_string (n_plp) << std::endl;
+        aev.count_pileup (pl, pos_offset, safe_size (n_plp));
     }
 
     // if (maxmismatches != -1 && no_NM_count > 0) {
@@ -106,6 +124,7 @@ inline void count (htsFile *aln_fh,
     //             no_NM_count);
     // }
 
+    sam_itr_destroy (iter);
     bam_destroy1 (b);
     bam_hdr_destroy (head);
     bam_plp_destroy (buf);
@@ -122,6 +141,7 @@ int main (int argc,
     bam_hdr_t *head;
     hts_region reg;
     count_params cp;
+    bool print_head = false;
 
     // defaults
     cp.min_mapq = 25;
@@ -135,14 +155,26 @@ int main (int argc,
     try {
         cxxopts::Options options (
             "count-alleles",
-            "c++ implementation of bam2R\n\n"
-            "Where reference names contain colons, surround in curly "
-            "braces like {HLA-DRB1*12:17}:<start>-<end>\n\n"
+            "standalone implementation of bam2R"
+            "\n\n"
+            "Where reference names contain colons, surround in"
+            "\n"
+            "curly braces like {HLA-DRB1*12:17}:<start>-<end>"
+            "\n\n"
 
-            "chr1:100 is treated as the single base pair region "
-            "chr1:100-100.\n"
-            "chr1:-100 is shorthand for chr1:1-100 and chr1:100- is "
-            "ch1:100-<end>\n.");
+            "chr1:100 is treated as the single base pair region"
+            "\n"
+            "chr1:100-100. chr1:-100 is shorthand for chr1:1-100"
+            "\n"
+            "and chr1:100- is ch1:100-<end>."
+            "\n\n"
+
+            "A result matrix with end-start rows and 22 columns"
+            "\n"
+            "of event counters (see --head) is printed to stdout"
+            "\n"
+            "as a csv. Logging is printed to stderr."
+            "\n");
 
         // clang-format off
         options.add_options()
@@ -166,6 +198,7 @@ int main (int argc,
              "Maximum read depth (default 1000000)",
              cxxopts::value<int>())
 
+            ("head", "Print header")
             ("h,help", "Print usage");
         // clang-format on
 
@@ -173,17 +206,17 @@ int main (int argc,
         options.positional_help ("<.BAM/.CRAM> chr:start-end");
         auto parsed_args = options.parse (argc, argv);
 
+        if (parsed_args.count ("help")) {
+            std::cout << options.help() << std::endl;
+            return 0; // nothing given nothing done
+        }
+
         if ((!parsed_args.count ("aln")) ||
             (!parsed_args.count ("region"))) {
             std::cout << "incorrect usage: all postional arguments "
                          "required. Try --help"
                       << std::endl;
             return 1;
-        }
-
-        if (parsed_args.count ("help")) {
-            std::cout << options.help() << std::endl;
-            return 0; // nothing given nothing done
         }
 
         aln_path = parsed_args["aln"].as<fs::path>();
@@ -208,6 +241,9 @@ int main (int argc,
         if (parsed_args.count ("depth")) {
             cp.max_depth = parsed_args["depth"].as<int>();
         }
+        if (parsed_args.count ("head")) {
+            print_head = true;
+        }
 
     } catch (const std::exception &e) {
         std::cerr << "Error parsing CLI options: " << e.what()
@@ -229,7 +265,6 @@ int main (int argc,
                 "failed to get header from alignment file");
         }
 
-        printf ("%s\n", region_str.c_str());
         auto rp =
             sam_parse_region (head, region_str.c_str(), &tid, &start,
                               &end, HTS_PARSE_ONE_COORD);
@@ -249,8 +284,8 @@ int main (int argc,
                 "parse failed for input region " + region_str +
                 " - " + msg);
         }
-        // start - 1 cargo culted from bam2R...
-        reg = hts_region::by_end (tid, start - 1, end);
+        // bam2R did start-1 and I don't know why
+        reg = hts_region::by_end (tid, start, end);
 
         idx = sam_index_load (aln_in, aln_path.c_str());
         if (!idx) {
@@ -260,10 +295,13 @@ int main (int argc,
         safe_size_opts sso;
         sso.msg =
             "error in calculating cells needed for storing result";
-        result.resize (safe_size (static_cast<int64_t> (
-                                      reg.rlen * N_FIELDS_PER_OBS),
-                                  sso),
-                       0);
+        size_t n_cells = safe_size (
+            static_cast<int64_t> (reg.rlen * N_FIELDS_PER_OBS));
+        std::cerr << "region length: " << std::to_string (reg.rlen)
+                  << std::endl;
+        std::cerr << "n_cells: " << std::to_string (n_cells)
+                  << std::endl;
+        result.resize (n_cells, 0);
 
     } catch (std::exception &e) {
         std::cerr << "Error during setup: " << e.what() << std::endl;
@@ -279,13 +317,17 @@ int main (int argc,
     }
 
     try {
-        for (size_t i = 0; i < result.size(); i += N_FIELDS_PER_OBS) {
+        if (print_head)
+            std::cout << HEADER << "\n";
+        size_t i = 0;
+        while (i < result.size()) {
             size_t j = 0;
             while (j < (N_FIELDS_PER_OBS - 1)) {
                 std::cout << result[i + j] << ",";
                 ++j;
             }
-            std::cout << result[i + j + 1] << "\n";
+            std::cout << result[i + j] << "\n";
+            i += N_FIELDS_PER_OBS;
         }
     } catch (std::exception &e) {
         std::cerr << "Error during write: " << e.what() << std::endl;
